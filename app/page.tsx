@@ -571,6 +571,10 @@ const DOC_CSS = `
 .a4-head, .a4-foot { position: absolute; left: 50%; transform: translateX(-50%); height: auto; display: block;
   max-width: none; pointer-events: none; user-select: none; -webkit-user-drag: none; }
 .a4-head { top: var(--head-top); width: var(--head-w); }
+.a4-head.in { animation: lhHeadIn .55s cubic-bezier(.2,.8,.2,1) both; }
+.a4-foot.in { animation: lhFootIn .55s cubic-bezier(.2,.8,.2,1) both; }
+.a4-head.out, .a4-foot.out { animation: lhOut .45s ease forwards; }
+.a4-viewport.lh-swap { animation: lhText .55s cubic-bezier(.2,.8,.2,1) .08s both; }
 .a4-foot { bottom: ${FOOT_BOTTOM_MM}mm; width: var(--foot-w); }
 
 /* หน้าต่างตัดเนื้อหา: กว้างกว่าพื้นที่เนื้อหาข้างละ ${BLEED}mm เพื่อไม่ตัดขอบตารางที่กว้างกว่าข้อความ
@@ -632,6 +636,10 @@ const DOC_CSS = `
   }
 }
 
+@keyframes lhHeadIn { from { opacity: 0; transform: translateX(-50%) translateY(-14px); filter: blur(3px); } to { opacity: 1; transform: translateX(-50%) translateY(0); filter: blur(0); } }
+@keyframes lhFootIn { from { opacity: 0; transform: translateX(-50%) translateY(14px); filter: blur(3px); } to { opacity: 1; transform: translateX(-50%) translateY(0); filter: blur(0); } }
+@keyframes lhOut { from { opacity: 1; } to { opacity: 0; } }
+@keyframes lhText { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes pageIn { from { opacity: 0; transform: translateY(14px) scale(.985); } to { opacity: 1; transform: none; } }
 @keyframes caretBlink { 0%, 45% { opacity: 1; } 55%, 95% { opacity: .05; } 100% { opacity: 1; } }
 @keyframes fieldPulse { 0%,100% { box-shadow: 0 0 0 2px rgba(245,158,11,.9), 0 0 0 0 rgba(245,158,11,.35); }
@@ -756,9 +764,16 @@ const UI_CSS = `
 .ui-chip.live .dot { background: var(--accent); animation: dotPulse 1.4s ease-in-out infinite; }
 .ui-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .ui-lh { display: inline-flex; align-items: center; gap: 6px; padding: 3px 3px 3px 10px; border: 1px solid var(--border); border-radius: 11px; background: var(--panel2); color: var(--muted); }
-.ui-lh button { border: 0; background: transparent; color: var(--muted); font-size: 12.5px; font-weight: 700; padding: 5px 11px; border-radius: 8px; transition: color .25s, background .25s; }
+.ui-lh-track { position: relative; display: inline-flex; --w: 66px; }
+.ui-lh-track .ind {
+  position: absolute; top: 0; bottom: 0; left: 0; width: var(--w); border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2)); box-shadow: 0 4px 12px var(--ring);
+  transform: translateX(calc(var(--i) * var(--w))); transition: transform .42s cubic-bezier(.34,1.35,.5,1);
+}
+.ui-lh button { position: relative; z-index: 1; width: var(--w); border: 0; background: transparent; color: var(--muted); font-size: 12.5px; font-weight: 700; padding: 5px 0; border-radius: 8px; transition: color .3s, transform .15s; }
 .ui-lh button:hover { color: var(--accent); }
-.ui-lh button.on { color: #fff; background: linear-gradient(135deg, var(--accent), var(--accent2)); box-shadow: 0 4px 12px var(--ring); }
+.ui-lh button:active { transform: scale(.94); }
+.ui-lh button.on, .ui-lh button.on:hover { color: #fff; }
 .ui-zoom { display: inline-flex; align-items: center; gap: 4px; }
 .ui-zoom .pct { min-width: 48px; text-align: center; font-size: 12.5px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
 .ui-btn.sm { height: 32px; width: 32px; padding: 0; justify-content: center; border-radius: 9px; }
@@ -806,6 +821,10 @@ const UI_CSS = `
   .a4-page { margin: 0 !important; box-shadow: none !important; animation: none !important; opacity: 1 !important; transform: none !important;
              height: 296.5mm !important; /* เผื่อเศษทศนิยม ไม่ให้ล้นไปเป็นหน้าว่าง */ }
   .doc-field { background: none !important; box-shadow: none !important; text-decoration: none !important; animation: none !important; }
+  .a4-head.out, .a4-foot.out { display: none !important; }
+  .a4-head, .a4-foot, .a4-viewport { animation: none !important; filter: none !important; }
+  .a4-head, .a4-foot { opacity: 1 !important; transform: translateX(-50%) !important; }
+  .a4-viewport { opacity: 1 !important; transform: none !important; }
 }
 `;
 
@@ -842,6 +861,9 @@ export default function Home() {
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [letterheadId, setLetterheadId] = useState(LETTERHEADS[0].id);
   const letterhead = LETTERHEADS.find((l) => l.id === letterheadId) ?? LETTERHEADS[0];
+  const [prevLh, setPrevLh] = useState<Letterhead | null>(null);
+  const [swapN, setSwapN] = useState(0); // นับครั้งที่สลับ ใช้เป็น key เพื่อเล่นแอนิเมชันใหม่ทุกครั้ง
+  const swapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [pageCount, setPageCount] = useState(1);
   const [fontScale, setFontScale] = useState(FALLBACK_SCALE);
@@ -870,9 +892,15 @@ export default function Home() {
     } catch {}
   }, []);
   const chooseLetterhead = (id: string) => {
+    if (id === letterhead.id) return;
+    setPrevLh(letterhead); // เก็บอันเดิมไว้ให้ค่อยๆ จางหาย (ครอสเฟด)
+    setSwapN((n) => n + 1);
     setLetterheadId(id);
     try { localStorage.setItem("doc-letterhead", id); } catch {}
+    if (swapTimer.current) clearTimeout(swapTimer.current);
+    swapTimer.current = setTimeout(() => setPrevLh(null), 500);
   };
+  useEffect(() => () => { if (swapTimer.current) clearTimeout(swapTimer.current); }, []);
   const toggleTheme = () =>
     setTheme((t) => {
       const next = t === "dark" ? "light" : "dark";
@@ -1296,16 +1324,22 @@ export default function Home() {
             <div className="ui-tools">
             <div className="ui-lh" role="group" aria-label="เลือกหัวกระดาษ">
               <LayoutTemplate size={15} />
-              {LETTERHEADS.map((l) => (
-                <button
-                  key={l.id}
-                  className={l.id === letterhead.id ? "on" : ""}
-                  onClick={() => chooseLetterhead(l.id)}
-                  title={`ใช้หัว-ท้ายกระดาษ ${l.label}`}
-                >
-                  {l.label}
-                </button>
-              ))}
+              <div
+                className="ui-lh-track"
+                style={{ "--i": LETTERHEADS.findIndex((l) => l.id === letterhead.id) } as React.CSSProperties}
+              >
+                <i className="ind" />
+                {LETTERHEADS.map((l) => (
+                  <button
+                    key={l.id}
+                    className={l.id === letterhead.id ? "on" : ""}
+                    onClick={() => chooseLetterhead(l.id)}
+                    title={`ใช้หัว-ท้ายกระดาษ ${l.label}`}
+                  >
+                    {l.label}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="ui-zoom">
               <button className="ui-btn sm" onClick={() => stepZoom(-1)} aria-label="ย่อ">
@@ -1327,9 +1361,17 @@ export default function Home() {
               <div className="pages">
                 {Array.from({ length: pageCount }, (_, i) => (
                   <section key={i} className="a4-page doc-font" lang="th" style={docStyle}>
-                    <img className="a4-head" src={letterhead.head} alt="" draggable={false} />
-                    <img className="a4-foot" src={letterhead.foot} alt="" draggable={false} />
-                    <div className="a4-viewport">
+                    {prevLh && (
+                      <>
+                        <img className="a4-head out" src={prevLh.head} alt="" draggable={false}
+                          style={{ top: `${prevLh.headTop}mm`, width: `${prevLh.headW}mm` }} />
+                        <img className="a4-foot out" src={prevLh.foot} alt="" draggable={false}
+                          style={{ width: `${prevLh.footW}mm` }} />
+                      </>
+                    )}
+                    <img key={`h${swapN}`} className={`a4-head${swapN ? " in" : ""}`} src={letterhead.head} alt="" draggable={false} />
+                    <img key={`f${swapN}`} className={`a4-foot${swapN ? " in" : ""}`} src={letterhead.foot} alt="" draggable={false} />
+                    <div key={`v${swapN}`} className={`a4-viewport${swapN ? " lh-swap" : ""}`}>
                       <div className="a4-flow" style={{ transform: `translateX(-${i * STEP_MM}mm)` }}>
                         <DocBody d={formData} hl={hl} co={letterhead} />
                       </div>
