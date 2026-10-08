@@ -8,25 +8,44 @@ import React, {
   useState,
 } from "react";
 import {
-  FileText, Printer, Car, User, DollarSign, Eye, Sun, Moon, ZoomIn, ZoomOut,
+  FileText, Printer, Car, User, DollarSign, Eye, Sun, Moon, ZoomIn, ZoomOut, PenLine, LayoutTemplate,
 } from "lucide-react";
 
 /* =====================================================================
  * ค่าหน้ากระดาษ — วัดจากไฟล์ Word ต้นฉบับ (บันทึกข้อตกลงใช้รถไฟฟ้า)
  *   - กระดาษ A4, ฟอนต์ TH SarabunPSK ขนาด 16 pt ทั้งฉบับ
  *   - ขอบ บน 1440 / ขวา 1376 / ล่าง 1701 / ซ้าย 1440 twips
- *   - เลขหน้ารูปแบบ "- n -" กึ่งกลางหัวกระดาษ ห่างขอบบน 288 twips
+ *   - (เวอร์ชันนี้) ไม่แสดงเลขหน้า และแปะรูปหัว/ท้ายกระดาษบริษัทบนทุกหน้า
  * ทุกค่าใช้หน่วยจริง (mm / pt) เพื่อให้ "หน้าจอแก้ไข" = "ตัวอย่าง" = "PDF"
  * ===================================================================== */
 const PAGE_W = 210; // mm
 const PAGE_H = 297; // mm
-const M_TOP = 25.4;
+const M_TOP = 32; // เว้นให้พ้นหัวกระดาษ (เส้นเขียวใต้โลโก้อยู่ที่ ~27 มม.)
 const M_RIGHT = 24.3;
 const M_BOTTOM = 30;
 const M_LEFT = 25.4;
-const HEADER_OFFSET = 5.08; // ระยะเลขหน้าจากขอบบน
+/** ชุดหัว/ท้ายกระดาษที่เลือกได้ (ปุ่มเลือกอยู่บนแถบเครื่องมือหน้าตัวอย่าง)
+ *  head/foot = path รูปใน public/  | headW/footW = ความกว้างรูปบนกระดาษ (มม.) ความสูงคำนวณตามสัดส่วนรูป
+ *  headTop = ระยะรูปหัวจากขอบบนกระดาษ (มม.) ยิ่งมากรูปยิ่งเลื่อนลง (ควรเพิ่ม mTop ตามไปด้วย)
+ *  company = ชื่อบริษัทที่แสดงในเนื้อหาและบล็อกลายเซ็น | office = ข้อความที่อยู่สำนักงานในย่อหน้าคู่สัญญา
+ *  mTop/mBottom = ขอบบน/ล่างของเนื้อหา (มม.) ต้องมากกว่าความสูงรูปหัว/ท้าย ไม่งั้นข้อความจะทับรูป
+ *  เพิ่มหัวใหม่ได้โดยเพิ่ม object ในลิสต์นี้ */
+type Letterhead = {
+  id: string; label: string; company: string; office: string; head: string; foot: string;
+  headW: number; footW: number; headTop: number; mTop: number; mBottom: number;
+};
+const LETTERHEADS: Letterhead[] = [
+  { id: "com7", label: "COM7", company: "บริษัท คอมเซเว่น จำกัด (มหาชน)",
+    office: "สำนักงาน ตั้งอยู่เลขที่ 549/1 ถนนสรรพาวุธ แขวงบางนาใต้ เขตบางนา กรุงเทพมหานคร",
+    head: "/img/com/com7head.png", foot: "/img/com/com7foot.png",
+    headW: 210, footW: 210, headTop: 0, mTop: M_TOP, mBottom: M_BOTTOM },
+  { id: "ufun", label: "UFUN", company: "บริษัท ยูฟัน แคปปิตอล จำกัด",
+    office: "สำนักงาน ตั้งอยู่เลขที่ 549/1 ถนนสรรพาวุธ แขวงบางนาใต้ เขตบางนา กรุงเทพมหานคร", // TODO: แก้เป็นที่อยู่สำนักงานของ ยูฟัน แคปปิตอล
+    head: "/img/ufun/ufunhead.png", foot: "/img/ufun/ufunfoot.png",
+    headW: 210, footW: 210, headTop: 8, mTop: 40, mBottom: 30 },
+];
+const FOOT_BOTTOM_MM = 0; // ระยะรูปท้ายจากขอบล่างกระดาษ
 const CONTENT_W = +(PAGE_W - M_LEFT - M_RIGHT).toFixed(2); // 160.3 mm
-const CONTENT_H = +(PAGE_H - M_TOP - M_BOTTOM).toFixed(2); // 241.6 mm
 const COLUMN_GAP = 20; // mm ระยะห่างระหว่าง "หน้า" ภายในตัวจัดหน้า (ต้องมากกว่า BLEED)
 const BLEED = 10; // mm เผื่อให้ตารางที่กว้างกว่าพื้นที่เนื้อหาไม่ถูกตัด
 
@@ -60,9 +79,32 @@ const INITIAL = {
   depositAmountText: "ห้าหมื่นบาทถ้วน",
   depositDate: "1 ตุลาคม 2567",
   supervisorName: "สมศักดิ์ ผู้จัดการ",
+  companySignerName: "นาย ภาคภูมิ เสตะรัต",
+  witness1Name: "นาย ณัฐพล ธนัชธรรมนพ",
+  witness2Name: "นางสาว อรพิมพ์ ทวีผล",
 };
 type FormData = typeof INITIAL;
 type FieldKey = keyof FormData;
+
+/** แท็บหนึ่งแท็บ = เอกสารของพนักงานหนึ่งคน */
+type DocTab = { id: string; data: FormData };
+
+/** ช่องที่ "ไม่ควรซ้ำกัน" ระหว่างพนักงาน จะถูกล้างให้ว่างเมื่อสร้างแท็บใหม่
+ *  (ช่องอื่น เช่น วันที่ ผู้บังคับบัญชา เงื่อนไขหักเงิน จะคัดลอกจากแท็บปัจจุบัน) */
+const PER_PERSON: FieldKey[] = ["address", "engineNo", "chassisNo", "licensePlate"];
+
+/** แยกรายชื่อจากข้อความที่วาง: 1 บรรทัด = 1 คน (ตัดเลขลำดับหน้าชื่อ และรองรับการก๊อปจาก Excel) */
+const parseNames = (text: string) =>
+  text
+    .split(/\r?\n/)
+    .map((s) =>
+      s
+        .split("\t")[0]
+        .replace(/^\s*"(.*)"\s*$/, "$1") // Google Sheets ใส่ " ครอบช่องที่มีอักขระพิเศษ
+        .replace(/^\s*\d+\s*[.)]\s*/, "")
+        .trim()
+    )
+    .filter(Boolean);
 
 type FieldDef = {
   name: FieldKey;
@@ -85,9 +127,12 @@ const SECTIONS: SectionDef[] = [
     grid: false,
     fields: [
       { name: "docDate", label: "วันที่ทำหนังสือ", placeholder: "เช่น 10 ตุลาคม 2567" },
-      { name: "employeeName", label: "ชื่อ-นามสกุล พนักงาน" },
+      {
+        name: "employeeName",
+        label: "ชื่อ-นามสกุล พนักงาน",
+        placeholder: "วางรายชื่อหลายบรรทัดเพื่อสร้างแท็บอัตโนมัติ",
+      },
       { name: "address", label: "ที่อยู่ตามทะเบียนบ้าน/ปัจจุบัน", multiline: true },
-      { name: "supervisorName", label: "ชื่อผู้บังคับบัญชา / พยาน" },
     ],
   },
   {
@@ -116,6 +161,17 @@ const SECTIONS: SectionDef[] = [
       { name: "depositDate", label: "วันที่ชำระเงินประกัน", full: true },
     ],
   },
+  {
+    title: "4. ผู้ลงลายมือชื่อ",
+    icon: PenLine,
+    grid: false,
+    fields: [
+      { name: "supervisorName", label: "ผู้บังคับบัญชา / พยาน" },
+      { name: "companySignerName", label: "ผู้แทนบริษัท" },
+      { name: "witness1Name", label: "พยาน คนที่ 1" },
+      { name: "witness2Name", label: "พยาน คนที่ 2" },
+    ],
+  },
 ];
 
 const FIELD_LABELS = SECTIONS.flatMap((s) => s.fields).reduce(
@@ -131,7 +187,7 @@ const DOTS_LONG = "....................................................";
 /* =====================================================================
  * เนื้อหาเอกสาร — ถูก render ซ้ำหลายสำเนา (หนึ่งสำเนาต่อหนึ่งหน้า A4)
  * ===================================================================== */
-function DocBody({ d, hl }: { d: FormData; hl: Highlight }) {
+function DocBody({ d, hl, co }: { d: FormData; hl: Highlight; co: Letterhead }) {
   const Blank = () => <div className="d-blank" />;
   return (
     <>
@@ -141,14 +197,13 @@ function DocBody({ d, hl }: { d: FormData; hl: Highlight }) {
       <Blank />
 
       <p className="d-p">
-        หนังสือรับทราบฉบับนี้ทำขึ้น ณ บริษัท คอมเซเว่น จำกัด (มหาชน) เมื่อวันที่{" "}
+        หนังสือรับทราบฉบับนี้ทำขึ้น ณ {co.company} เมื่อวันที่{" "}
         {hl("docDate")} ระหว่าง
       </p>
       <Blank />
 
       <p className="d-p">
-        <b>บริษัท คอมเซเว่น จำกัด (มหาชน)</b> สำนักงาน ตั้งอยู่เลขที่ 549/1
-        ถนนสรรพาวุธ แขวงบางนาใต้ เขตบางนา กรุงเทพมหานคร ซึ่งต่อไปในหนังสือรับทราบนี้จะเรียกว่า
+        <b>{co.company}</b> {co.office} ซึ่งต่อไปในหนังสือรับทราบนี้จะเรียกว่า
         “บริษัท” ฝ่ายหนึ่ง กับ
       </p>
       <p className="d-p">
@@ -462,21 +517,21 @@ function DocBody({ d, hl }: { d: FormData; hl: Highlight }) {
         <Blank />
         <div className="d-sig">
           <p>
-            <b>บริษัท คอมเซเว่น จำกัด (มหาชน)</b>
+            <b>{co.company}</b>
           </p>
           <Blank />
           <p>ลงชื่อ………………………………บริษัท</p>
-          <p>( นาย ภาคภูมิ เสตะรัต )</p>
+          <p>( {hl("companySignerName", DOTS_LONG)} )</p>
         </div>
         <Blank />
         <div className="d-sig">
           <p>ลงชื่อ………………………………พยาน</p>
-          <p>( นาย ณัฐพล ธนัชธรรมนพ )</p>
+          <p>( {hl("witness1Name", DOTS_LONG)} )</p>
         </div>
         <Blank />
         <div className="d-sig">
           <p>ลงชื่อ………………………………พยาน</p>
-          <p>( นางสาว อรพิมพ์ ทวีผล )</p>
+          <p>( {hl("witness2Name", DOTS_LONG)} )</p>
         </div>
       </div>
     </>
@@ -513,14 +568,17 @@ const DOC_CSS = `
   animation: pageIn .5s cubic-bezier(.2,.8,.2,1) both;
 }
 .a4-page:last-child { margin-bottom: 0; break-after: auto; page-break-after: auto; }
-.a4-pn { position: absolute; top: ${HEADER_OFFSET}mm; left: 0; right: 0; text-align: center; }
+.a4-head, .a4-foot { position: absolute; left: 50%; transform: translateX(-50%); height: auto; display: block;
+  max-width: none; pointer-events: none; user-select: none; -webkit-user-drag: none; }
+.a4-head { top: var(--head-top); width: var(--head-w); }
+.a4-foot { bottom: ${FOOT_BOTTOM_MM}mm; width: var(--foot-w); }
 
 /* หน้าต่างตัดเนื้อหา: กว้างกว่าพื้นที่เนื้อหาข้างละ ${BLEED}mm เพื่อไม่ตัดขอบตารางที่กว้างกว่าข้อความ
    (ยังน้อยกว่าระยะห่างคอลัมน์ ${COLUMN_GAP}mm จึงไม่เห็นข้อความหน้าอื่นเล็ดเข้ามา) */
 .a4-viewport {
   position: absolute; overflow: hidden;
-  top: ${M_TOP}mm; left: ${M_LEFT - BLEED}mm;
-  width: ${CONTENT_W + BLEED * 2}mm; height: ${CONTENT_H}mm;
+  top: var(--m-top); left: ${M_LEFT - BLEED}mm;
+  width: ${CONTENT_W + BLEED * 2}mm; height: calc(${PAGE_H}mm - var(--m-top) - var(--m-bottom));
 }
 .a4-flow {
   margin-left: ${BLEED}mm;
@@ -531,7 +589,7 @@ const DOC_CSS = `
 }
 .a4-measure {
   position: absolute; left: -99999px; top: 0; visibility: hidden; pointer-events: none;
-  width: ${CONTENT_W}mm; height: ${CONTENT_H}mm; overflow: hidden;
+  width: ${CONTENT_W}mm; height: calc(${PAGE_H}mm - var(--m-top) - var(--m-bottom)); overflow: hidden;
 }
 .a4-measure .a4-flow { margin-left: 0; }
 
@@ -636,8 +694,24 @@ const UI_CSS = `
 .ui-seg button { position: relative; z-index: 1; border: 0; background: transparent; color: var(--muted); font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 8px; transition: color .25s, background .25s; }
 .ui-seg button.on { color: #fff; background: linear-gradient(135deg, var(--accent), var(--accent2)); box-shadow: 0 4px 12px var(--ring); }
 
+/* tabs (แท็บพนักงานแบบ Chrome) */
+.ui-tabs { display: flex; align-items: flex-end; gap: 4px; height: 44px; padding: 8px 24px 0; overflow-x: auto; scrollbar-width: none;
+  background: var(--bg2); border-bottom: 1px solid var(--border); }
+.ui-tabs::-webkit-scrollbar { display: none; }
+.ui-tab { display: flex; align-items: center; gap: 8px; flex: 0 1 200px; min-width: 110px; height: 36px; padding: 0 10px 0 12px;
+  border-radius: 10px 10px 0 0; border: 1px solid transparent; border-bottom: 0; color: var(--muted); font-size: 13.5px; font-weight: 600;
+  cursor: pointer; user-select: none; transition: background .2s, color .2s; }
+.ui-tab:hover { background: var(--panel2); }
+.ui-tab.on { background: var(--bg); color: var(--accent); border-color: var(--border); height: 37px; }
+.ui-tab svg { flex: none; }
+.ui-tab .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ui-tab .x { flex: none; width: 20px; height: 20px; border: 0; border-radius: 50%; background: transparent; color: inherit; font-size: 16px; line-height: 1; }
+.ui-tab .x:hover { background: var(--border); }
+.ui-tab-add { flex: none; width: 32px; height: 32px; margin-bottom: 2px; border: 0; border-radius: 50%; background: transparent; color: var(--muted); font-size: 20px; }
+.ui-tab-add:hover { background: var(--panel2); color: var(--accent); }
+
 /* workspace */
-.ui-workspace { display: grid; grid-template-columns: minmax(340px, 440px) minmax(0, 1fr); gap: 20px; padding: 20px 24px; height: calc(100vh - 64px); }
+.ui-workspace { display: grid; grid-template-columns: minmax(340px, 440px) minmax(0, 1fr); gap: 20px; padding: 20px 24px; height: calc(100vh - 64px - 44px); }
 .ui-pane { min-height: 0; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; scrollbar-width: thin; scrollbar-color: var(--border) transparent; padding-right: 4px; }
 .ui-pane.stage { overflow: auto; padding: 0; border-radius: 16px; background: var(--stage); border: 1px solid var(--border); transition: background .35s; display: flex; flex-direction: column; }
 .ui-pane.stage-scroll { flex: 1; min-height: 0; overflow: auto; scroll-behavior: smooth; padding: 22px 16px 40px; }
@@ -680,6 +754,11 @@ const UI_CSS = `
 .ui-chip.live { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
 .ui-chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
 .ui-chip.live .dot { background: var(--accent); animation: dotPulse 1.4s ease-in-out infinite; }
+.ui-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ui-lh { display: inline-flex; align-items: center; gap: 6px; padding: 3px 3px 3px 10px; border: 1px solid var(--border); border-radius: 11px; background: var(--panel2); color: var(--muted); }
+.ui-lh button { border: 0; background: transparent; color: var(--muted); font-size: 12.5px; font-weight: 700; padding: 5px 11px; border-radius: 8px; transition: color .25s, background .25s; }
+.ui-lh button:hover { color: var(--accent); }
+.ui-lh button.on { color: #fff; background: linear-gradient(135deg, var(--accent), var(--accent2)); box-shadow: 0 4px 12px var(--ring); }
 .ui-zoom { display: inline-flex; align-items: center; gap: 4px; }
 .ui-zoom .pct { min-width: 48px; text-align: center; font-size: 12.5px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
 .ui-btn.sm { height: 32px; width: 32px; padding: 0; justify-content: center; border-radius: 9px; }
@@ -694,6 +773,7 @@ const UI_CSS = `
 
 @media (max-width: 1023px) {
   .ui-header { padding: 0 14px; }
+  .ui-tabs { padding: 8px 12px 0; }
   .ui-sub, .ui-btn .lbl { display: none; }
   .ui-seg { display: inline-flex; }
   .ui-workspace { display: block; height: auto; padding: 12px; }
@@ -720,8 +800,8 @@ const UI_CSS = `
     background: #fff !important; box-shadow: none !important; border-radius: 0 !important;
   }
   .ui-pane.hide-sm { display: block !important; }
-  /* ต้องอยู่หลังกฎ display:block ด้านบน และ specificity สูงกว่า เพื่อให้ฟอร์ม/แถบเครื่องมือไม่ถูกพิมพ์ */
-  .ui-root .no-print, .ui-root .ui-pane.no-print, .ui-root .a4-measure { display: none !important; }
+  /* ต้องอยู่หลังกฎ display:block ด้านบน และ specificity สูงกว่า เพื่อให้ฟอร์ม/แถบแท็บ/แถบเครื่องมือไม่ถูกพิมพ์ */
+  .ui-root .no-print, .ui-root .ui-pane.no-print, .ui-root .ui-tabs, .ui-root .a4-measure { display: none !important; }
   .zoom-wrap { zoom: 1 !important; width: auto !important; margin: 0 !important; }
   .a4-page { margin: 0 !important; box-shadow: none !important; animation: none !important; opacity: 1 !important; transform: none !important;
              height: 296.5mm !important; /* เผื่อเศษทศนิยม ไม่ให้ล้นไปเป็นหน้าว่าง */ }
@@ -745,11 +825,23 @@ function snapToCluster(text: string, index: number): number {
 }
 
 export default function Home() {
-  const [formData, setFormData] = useState<FormData>(INITIAL);
+  /* ---------- แท็บพนักงาน (1 แท็บ = 1 เอกสาร) ---------- */
+  const [tabs, setTabs] = useState<DocTab[]>([{ id: "t0", data: INITIAL }]);
+  const [docTabId, setDocTabId] = useState("t0");
+  const idCounter = useRef(1);
+
+  const currentTab = tabs.find((t) => t.id === docTabId) ?? tabs[0];
+  const formData = currentTab.data;
+  // ใช้ชื่อเดิม โค้ดส่วนอื่น (handleChange ฯลฯ) จึงไม่ต้องแก้
+  const setFormData = (fn: (prev: FormData) => FormData) =>
+    setTabs((ts) => ts.map((t) => (t.id === currentTab.id ? { ...t, data: fn(t.data) } : t)));
+
   const [activeField, setActiveField] = useState<FieldKey | null>(null);
   const [caret, setCaret] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<"edit" | "preview">("edit");
   const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [letterheadId, setLetterheadId] = useState(LETTERHEADS[0].id);
+  const letterhead = LETTERHEADS.find((l) => l.id === letterheadId) ?? LETTERHEADS[0];
 
   const [pageCount, setPageCount] = useState(1);
   const [fontScale, setFontScale] = useState(FALLBACK_SCALE);
@@ -771,6 +863,16 @@ export default function Home() {
       else if (window.matchMedia?.("(prefers-color-scheme: dark)").matches) setTheme("dark");
     } catch {}
   }, []);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("doc-letterhead");
+      if (saved && LETTERHEADS.some((l) => l.id === saved)) setLetterheadId(saved);
+    } catch {}
+  }, []);
+  const chooseLetterhead = (id: string) => {
+    setLetterheadId(id);
+    try { localStorage.setItem("doc-letterhead", id); } catch {}
+  };
   const toggleTheme = () =>
     setTheme((t) => {
       const next = t === "dark" ? "light" : "dark";
@@ -787,6 +889,56 @@ export default function Home() {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
     syncCaret(e.target);
+  };
+
+  /* ---------- จัดการแท็บ ---------- */
+  const switchTab = (id: string) => {
+    setDocTabId(id);
+    setActiveField(null);
+    setCaret(null);
+  };
+
+  const addTab = () => {
+    const id = `t${idCounter.current++}`;
+    const blank: FormData = { ...currentTab.data, employeeName: "" };
+    PER_PERSON.forEach((k) => (blank[k] = ""));
+    setTabs((ts) => {
+      const i = ts.findIndex((t) => t.id === currentTab.id);
+      return [...ts.slice(0, i + 1), { id, data: blank }, ...ts.slice(i + 1)];
+    });
+    switchTab(id);
+  };
+
+  const closeTab = (id: string) => {
+    if (tabs.length === 1) return;
+    const i = tabs.findIndex((t) => t.id === id);
+    const next = tabs.filter((t) => t.id !== id);
+    setTabs(next);
+    if (id === docTabId) switchTab(next[Math.max(0, i - 1)].id);
+  };
+
+  /** คนแรกใส่แท็บปัจจุบัน คนที่ 2..n สร้างแท็บใหม่ต่อท้าย */
+  const importNames = (names: string[]) => {
+    const base: FormData = { ...currentTab.data };
+    PER_PERSON.forEach((k) => (base[k] = ""));
+    const created: DocTab[] = names.slice(1).map((n) => ({
+      id: `t${idCounter.current++}`,
+      data: { ...base, employeeName: n },
+    }));
+    setTabs((ts) => {
+      const i = ts.findIndex((t) => t.id === currentTab.id);
+      const updated = ts.map((t) =>
+        t.id === currentTab.id ? { ...t, data: { ...t.data, employeeName: names[0] } } : t
+      );
+      return [...updated.slice(0, i + 1), ...created, ...updated.slice(i + 1)];
+    });
+  };
+
+  const handleNamePaste = (e: React.ClipboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const names = parseNames(e.clipboardData.getData("text"));
+    if (names.length < 2) return; // วางชื่อเดียว → ทำงานปกติ
+    e.preventDefault();
+    importNames(names);
   };
 
   const handleDocumentClick = useCallback((field: FieldKey) => {
@@ -864,9 +1016,10 @@ export default function Home() {
     setPageCount((prev) => (prev === n ? prev : n));
   }, []);
 
+  // วัดใหม่ทุกครั้งที่ข้อมูลเปลี่ยน หรือสลับแท็บ
   useIsoLayoutEffect(() => {
     measure();
-  }, [formData, fontScale, measure]);
+  }, [formData, fontScale, letterhead, measure]);
 
   useEffect(() => {
     const fonts = document.fonts;
@@ -957,10 +1110,15 @@ export default function Home() {
     );
   };
 
-  const docStyle: React.CSSProperties = {
+  const docStyle = {
     fontSize: `${FONT_PT * fontScale}pt`,
     lineHeight: `${LINE_PT}pt`,
-  };
+    "--m-top": `${letterhead.mTop}mm`,
+    "--m-bottom": `${letterhead.mBottom}mm`,
+    "--head-w": `${letterhead.headW}mm`,
+    "--head-top": `${letterhead.headTop}mm`,
+    "--foot-w": `${letterhead.footW}mm`,
+  } as React.CSSProperties;
 
   const allFields = SECTIONS.flatMap((s) => s.fields);
   const filled = allFields.filter((f) => formData[f.name].trim() !== "").length;
@@ -973,7 +1131,7 @@ export default function Home() {
       {/* ตัววัดจำนวนหน้า (ไม่แสดงผล) */}
       <div className="a4-measure doc-font" aria-hidden lang="th" style={docStyle}>
         <div ref={measureRef} className="a4-flow">
-          <DocBody d={formData} hl={hl} />
+          <DocBody d={formData} hl={hl} co={letterhead} />
         </div>
       </div>
 
@@ -1009,6 +1167,39 @@ export default function Home() {
           </button>
         </div>
       </header>
+
+      {/* แถบแท็บพนักงาน (แบบ Chrome) */}
+      <div className="ui-tabs no-print" role="tablist">
+        {tabs.map((t, i) => (
+          <div
+            key={t.id}
+            role="tab"
+            aria-selected={t.id === currentTab.id}
+            className={`ui-tab${t.id === currentTab.id ? " on" : ""}`}
+            onClick={() => switchTab(t.id)}
+            onAuxClick={(e) => e.button === 1 && closeTab(t.id)}
+            title={t.data.employeeName || `คนที่ ${i + 1}`}
+          >
+            <User size={14} />
+            <span className="t">{t.data.employeeName.trim() || `คนที่ ${i + 1}`}</span>
+            {tabs.length > 1 && (
+              <button
+                className="x"
+                aria-label="ปิดแท็บ"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  closeTab(t.id);
+                }}
+              >
+                ×
+              </button>
+            )}
+          </div>
+        ))}
+        <button className="ui-tab-add" onClick={addTab} aria-label="เพิ่มแท็บ" title="เพิ่มพนักงาน">
+          +
+        </button>
+      </div>
 
       <div className="ui-workspace">
         {/* ฟอร์ม */}
@@ -1076,6 +1267,7 @@ export default function Home() {
                             {...common}
                             type="text"
                             placeholder={f.placeholder}
+                            onPaste={f.name === "employeeName" ? handleNamePaste : undefined}
                             ref={(el) => {
                               inputRefs.current[f.name] = el;
                             }}
@@ -1101,6 +1293,20 @@ export default function Home() {
               <span className="dot" />
               {activeField ? `กำลังพิมพ์: ${FIELD_LABELS[activeField]}` : "คลิกจุดไฮไลต์บนเอกสารเพื่อแก้ไข"}
             </span>
+            <div className="ui-tools">
+            <div className="ui-lh" role="group" aria-label="เลือกหัวกระดาษ">
+              <LayoutTemplate size={15} />
+              {LETTERHEADS.map((l) => (
+                <button
+                  key={l.id}
+                  className={l.id === letterhead.id ? "on" : ""}
+                  onClick={() => chooseLetterhead(l.id)}
+                  title={`ใช้หัว-ท้ายกระดาษ ${l.label}`}
+                >
+                  {l.label}
+                </button>
+              ))}
+            </div>
             <div className="ui-zoom">
               <button className="ui-btn sm" onClick={() => stepZoom(-1)} aria-label="ย่อ">
                 <ZoomOut size={15} />
@@ -1113,6 +1319,7 @@ export default function Home() {
                 พอดี
               </button>
             </div>
+            </div>
           </div>
 
           <div ref={stageRef} className="ui-pane stage-scroll">
@@ -1120,10 +1327,11 @@ export default function Home() {
               <div className="pages">
                 {Array.from({ length: pageCount }, (_, i) => (
                   <section key={i} className="a4-page doc-font" lang="th" style={docStyle}>
-                    <div className="a4-pn">- {i + 1} -</div>
+                    <img className="a4-head" src={letterhead.head} alt="" draggable={false} />
+                    <img className="a4-foot" src={letterhead.foot} alt="" draggable={false} />
                     <div className="a4-viewport">
                       <div className="a4-flow" style={{ transform: `translateX(-${i * STEP_MM}mm)` }}>
-                        <DocBody d={formData} hl={hl} />
+                        <DocBody d={formData} hl={hl} co={letterhead} />
                       </div>
                     </div>
                   </section>
