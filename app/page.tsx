@@ -783,6 +783,10 @@ const UI_CSS = `
 .ui-pane.stage { overflow: auto; padding: 0; border-radius: 16px; background: var(--stage); border: 1px solid var(--border); transition: background .35s; display: flex; flex-direction: column; }
 .ui-pane.stage-scroll { flex: 1; min-height: 0; overflow: auto; scroll-behavior: smooth; padding: 22px 16px 40px; }
 
+/* โหมดแก้ไขเนื้อหาเอกสาร: ซ่อนฟอร์ม ให้หน้าเอกสารใช้พื้นที่เต็มความกว้าง */
+.ui-workspace.is-editing { grid-template-columns: minmax(0, 1fr); }
+.ui-workspace.is-editing > .ui-pane.form-pane { display: none; }
+
 /* progress */
 .ui-progress { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 14px 16px; margin-bottom: 16px; box-shadow: var(--shadow); }
 .ui-progress-row { display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
@@ -841,6 +845,9 @@ const UI_CSS = `
 .ui-btn.sm.txt { width: auto; padding: 0 10px; font-size: 12.5px; }
 .ui-btn.sm.on { border: 0; color: #fff; background: linear-gradient(135deg, var(--accent), var(--accent2)); box-shadow: 0 4px 12px var(--ring); }
 .ui-editgrp { display: inline-flex; align-items: center; gap: 6px; }
+.ui-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 90; display: flex; align-items: center; gap: 14px;
+  padding: 10px 12px 10px 16px; border-radius: 14px; background: var(--panel); color: var(--text); border: 1px solid var(--border);
+  box-shadow: 0 12px 32px rgba(0,0,0,.28); font-size: 14px; font-weight: 600; animation: fadeIn .25s ease both; }
 
 /* กล่องถามขอบเขตการแก้ไข (เฉพาะแท็บนี้ / ทุกแท็บ) */
 .ui-modal-bg { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 16px;
@@ -883,7 +890,7 @@ const UI_CSS = `
 @media print {
   html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; height: auto !important; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .no-print, .a4-measure, .doc-caret, .ui-modal-bg, .edit-sheet { display: none !important; }
+  .no-print, .a4-measure, .doc-caret, .ui-modal-bg, .ui-toast, .edit-sheet { display: none !important; }
   .ui-root { background: #fff !important; min-height: 0 !important; }
   .ui-workspace, .ui-pane, .ui-pane.stage, .ui-pane.stage-scroll {
     display: block !important; position: static !important; height: auto !important; max-height: none !important;
@@ -969,6 +976,37 @@ export default function Home() {
   const [scopeAsk, setScopeAsk] = useState<null | "edit" | "reset">(null); // กล่องถามขอบเขต
   const editorRef = useRef<HTMLDivElement | null>(null);
   const editInit = useRef("");
+
+  /* ---------- ย้อนกลับการ "ล้างฟอร์ม" (Ctrl+Z) ---------- */
+  const undoRef = useRef<{ id: string; data: FormData } | null>(null);
+  const [undoToast, setUndoToast] = useState(false);
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** ทิ้งจุดย้อนกลับ (เมื่อผู้ใช้แก้ข้อมูล/เปลี่ยนแท็บหลังล้าง) เพื่อให้ Ctrl+Z กลับไปเป็นการย้อนปกติของช่องพิมพ์ */
+  const dropUndo = () => {
+    undoRef.current = null;
+    setUndoToast(false);
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+  };
+  const undoClear = () => {
+    const s = undoRef.current;
+    if (!s) return;
+    setTabs((ts) => ts.map((t) => (t.id === s.id ? { ...t, data: s.data } : t)));
+    dropUndo();
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.code !== "KeyZ") return;
+      if (!undoRef.current) return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el?.isContentEditable) return; // กำลังแก้เนื้อหาเอกสาร ใช้การย้อนของเบราว์เซอร์
+      e.preventDefault();
+      undoClear();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => () => { if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
 
   const inputRefs = useRef<Record<string, HTMLInputElement | HTMLTextAreaElement | null>>({});
   const measureRef = useRef<HTMLDivElement | null>(null);
@@ -1056,6 +1094,7 @@ export default function Home() {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
+    dropUndo();
     setFormData((prev) => ({ ...prev, [name]: value }));
     syncCaret(e.target);
   };
@@ -1063,6 +1102,7 @@ export default function Home() {
   /* ---------- จัดการแท็บ ---------- */
   const switchTab = (id: string) => {
     setDocTabId(id);
+    dropUndo();
     setEditing(false); // เปลี่ยนแท็บระหว่างแก้เนื้อหา = ยกเลิกการแก้ไข
     setScopeAsk(null);
     setActiveField(null);
@@ -1090,7 +1130,11 @@ export default function Home() {
 
   /** ล้างทุกช่องของแท็บปัจจุบัน (แท็บอื่นไม่กระทบ) */
   const clearForm = () => {
-    if (!window.confirm("ล้างข้อมูลทุกช่องในแท็บนี้ใช่หรือไม่?\n(แท็บอื่นจะไม่ถูกลบ)")) return;
+    if (!window.confirm("ล้างข้อมูลทุกช่องในแท็บนี้ใช่หรือไม่?\n(แท็บอื่นจะไม่ถูกลบ · กด Ctrl+Z เพื่อย้อนกลับได้)")) return;
+    undoRef.current = { id: currentTab.id, data: currentTab.data }; // เก็บของเดิมไว้ให้ย้อนกลับ
+    setUndoToast(true);
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    undoTimer.current = setTimeout(() => setUndoToast(false), 8000); // ซ่อนแถบแจ้งเตือน (Ctrl+Z ยังใช้ได้)
     setFormData(() => ({ ...BLANK }));
     setActiveField(null);
     setCaret(null);
@@ -1118,6 +1162,7 @@ export default function Home() {
     const names = parseNames(e.clipboardData.getData("text"));
     if (names.length < 2) return; // วางชื่อเดียว → ทำงานปกติ
     e.preventDefault();
+    dropUndo();
     importNames(names);
   };
 
@@ -1511,9 +1556,9 @@ export default function Home() {
         </button>
       </div>
 
-      <div className="ui-workspace">
-        {/* ฟอร์ม */}
-        <div className={`ui-pane no-print${activeTab === "preview" ? " hide-sm" : " ui-fade"}`}>
+      <div className={`ui-workspace${editing ? " is-editing" : ""}`}>
+        {/* ฟอร์ม (ซ่อนระหว่างแก้ไขเนื้อหาเอกสาร เพื่อให้หน้าเอกสารกว้างขึ้น) */}
+        <div className={`ui-pane form-pane no-print${activeTab === "preview" ? " hide-sm" : " ui-fade"}`}>
           <div className="ui-progress">
             <div className="ui-progress-row">
               <span>ความคืบหน้าการกรอก</span>
@@ -1720,6 +1765,16 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      {/* แถบแจ้งเตือนหลังล้างฟอร์ม พร้อมปุ่มย้อนกลับ */}
+      {undoToast && (
+        <div className="ui-toast no-print" role="status">
+          <span>ล้างข้อมูลแท็บนี้แล้ว</span>
+          <button className="ui-btn sm txt" onClick={undoClear}>
+            ย้อนกลับ (Ctrl+Z)
+          </button>
+        </div>
+      )}
 
       {/* กล่องถามขอบเขต: แก้ไข/คืนค่าเดิม เฉพาะแท็บนี้ หรือทุกแท็บ */}
       {scopeAsk && (
