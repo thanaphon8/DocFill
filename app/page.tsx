@@ -9,6 +9,7 @@ import React, {
 } from "react";
 import {
   FileText, Printer, Car, User, DollarSign, Eye, Sun, Moon, ZoomIn, ZoomOut, PenLine, LayoutTemplate, Eraser,
+  Pencil, Check,
 } from "lucide-react";
 
 /* =====================================================================
@@ -102,12 +103,17 @@ const BLANK = Object.fromEntries(Object.keys(INITIAL).map((k) => [k, ""])) as Fo
 /** คีย์ที่ใช้จำข้อมูลที่กรอกไว้ในเบราว์เซอร์ (เปลี่ยน v1 เป็น v2 ถ้าแก้โครงสร้างข้อมูลจนไม่เข้ากัน) */
 const STORAGE_KEY = "doc-form-tabs-v1";
 
-/** แท็บหนึ่งแท็บ = เอกสารของพนักงานหนึ่งคน */
-type DocTab = { id: string; data: FormData };
+/** แท็บหนึ่งแท็บ = เอกสารของพนักงานหนึ่งคน
+ *  html = เนื้อหาเอกสารที่ผู้ใช้แก้ไขเอง (ถ้าไม่มี ใช้ข้อความต้นฉบับจาก DocBody) */
+type DocTab = { id: string; data: FormData; html?: string };
 
 /** ช่องที่ "ไม่ควรซ้ำกัน" ระหว่างพนักงาน จะถูกล้างให้ว่างเมื่อสร้างแท็บใหม่
  *  (ช่องอื่น เช่น วันที่ ผู้บังคับบัญชา เงื่อนไขหักเงิน จะคัดลอกจากแท็บปัจจุบัน) */
 const PER_PERSON: FieldKey[] = ["address", "engineNo", "chassisNo", "licensePlate"];
+
+/** ช่องที่ "ล็อก" ในโหมดแก้ไขทุกแท็บ (เป็นข้อมูลเฉพาะบุคคล ถ้าแก้พร้อมกันจะเขียนทับของทุกคน)
+ *  ถ้าอยากให้แก้ได้ทุกช่อง ให้เปลี่ยนเป็น [] */
+const ALL_LOCKED: FieldKey[] = ["employeeName", ...PER_PERSON];
 
 /** แยกรายชื่อจากข้อความที่วาง: 1 บรรทัด = 1 คน (ตัดเลขลำดับหน้าชื่อ และรองรับการก๊อปจาก Excel) */
 const parseNames = (text: string) =>
@@ -214,6 +220,8 @@ const SigLine = ({ role }: { role: string }) => (
  * ===================================================================== */
 function DocBody({ d, hl, co }: { d: FormData; hl: Highlight; co: Letterhead }) {
   const Blank = () => <div className="d-blank" />;
+  /** ชื่อบริษัท/ที่อยู่สำนักงาน — ห่อด้วย data-co เพื่อให้เนื้อหาที่ผู้ใช้แก้ไขยังเปลี่ยนตามหัวกระดาษที่เลือก */
+  const Co = ({ k }: { k: "company" | "office" }) => <span data-co={k}>{co[k]}</span>;
   return (
     <>
       <p className="d-title">
@@ -222,13 +230,13 @@ function DocBody({ d, hl, co }: { d: FormData; hl: Highlight; co: Letterhead }) 
       <Blank />
 
       <p className="d-p">
-        หนังสือรับทราบฉบับนี้ทำขึ้น ณ {co.company} เมื่อวันที่{" "}
+        หนังสือรับทราบฉบับนี้ทำขึ้น ณ <Co k="company" /> เมื่อวันที่{" "}
         {hl("docDate")} ระหว่าง
       </p>
       <Blank />
 
       <p className="d-p">
-        <b>{co.company}</b> {co.office} ซึ่งต่อไปในหนังสือรับทราบนี้จะเรียกว่า
+        <b><Co k="company" /></b> <Co k="office" /> ซึ่งต่อไปในหนังสือรับทราบนี้จะเรียกว่า
         “บริษัท” ฝ่ายหนึ่ง กับ
       </p>
       <p className="d-p">
@@ -544,7 +552,7 @@ function DocBody({ d, hl, co }: { d: FormData; hl: Highlight; co: Letterhead }) 
         <Blank />
         <div className="d-sig">
           <p>
-            <b>{co.company}</b>
+            <b><Co k="company" /></b>
           </p>
           <div className="d-sig-space" />
           <SigLine role="บริษัท" />
@@ -671,6 +679,21 @@ const DOC_CSS = `
   }
 }
 
+/* ---------- โหมดแก้ไขเนื้อหาเอกสาร (ปุ่มดินสอ) : แผ่นเดียวต่อเนื่อง พิมพ์แก้ได้ทุกจุด ---------- */
+.edit-sheet {
+  display: block; width: ${PAGE_W}mm; min-height: ${PAGE_H}mm; margin: 0 auto; background: #fff; color: #000;
+  padding: var(--m-top) ${M_RIGHT}mm var(--m-bottom) ${M_LEFT}mm;
+  box-shadow: 0 0 0 2px #4f46e5, 0 12px 32px rgba(15,23,42,.18);
+}
+.edit-sheet .a4-flow { column-width: auto; columns: auto; height: auto; width: auto; margin-left: 0; outline: none; caret-color: #4f46e5;
+  /* contenteditable ของ Chrome ตั้ง line-break: after-white-space ให้เอง ทำให้การตัดบรรทัดภาษาไทยผิดไปจากหน้าตัวอย่าง
+     (ข้อความถูกดันขึ้นบรรทัดใหม่ทั้งก้อน) จึงบังคับกลับเป็นกติกาเดียวกับหน้าตัวอย่าง/PDF */
+  -webkit-line-break: auto !important; line-break: auto !important; word-break: normal !important;
+  overflow-wrap: break-word; white-space: normal; }
+.edit-sheet .doc-field, .edit-sheet [data-co] { cursor: default; }
+.edit-sheet [data-field][contenteditable="true"] { cursor: text; background: rgba(253, 224, 71, .45); }
+.edit-sheet .doc-field, .edit-sheet [data-field] { text-decoration: none !important; }
+
 @keyframes lhHeadIn { from { opacity: 0; transform: translateX(-50%) translateY(-14px); filter: blur(3px); } to { opacity: 1; transform: translateX(-50%) translateY(0); filter: blur(0); } }
 @keyframes lhFootIn { from { opacity: 0; transform: translateX(-50%) translateY(14px); filter: blur(3px); } to { opacity: 1; transform: translateX(-50%) translateY(0); filter: blur(0); } }
 @keyframes lhOut { from { opacity: 1; } to { opacity: 0; } }
@@ -703,6 +726,7 @@ const UI_CSS = `
 }
 .ui-root *, .ui-root *::before, .ui-root *::after { box-sizing: border-box; }
 .ui-root button { font-family: inherit; cursor: pointer; }
+.ui-root button:disabled { opacity: .5; cursor: not-allowed; transform: none !important; box-shadow: none !important; }
 
 /* header */
 .ui-header {
@@ -815,6 +839,21 @@ const UI_CSS = `
 .ui-zoom .pct { min-width: 48px; text-align: center; font-size: 12.5px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
 .ui-btn.sm { height: 32px; width: 32px; padding: 0; justify-content: center; border-radius: 9px; }
 .ui-btn.sm.txt { width: auto; padding: 0 10px; font-size: 12.5px; }
+.ui-btn.sm.on { border: 0; color: #fff; background: linear-gradient(135deg, var(--accent), var(--accent2)); box-shadow: 0 4px 12px var(--ring); }
+.ui-editgrp { display: inline-flex; align-items: center; gap: 6px; }
+
+/* กล่องถามขอบเขตการแก้ไข (เฉพาะแท็บนี้ / ทุกแท็บ) */
+.ui-modal-bg { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 16px;
+  background: rgba(8,12,28,.5); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); animation: fadeIn .2s ease both; }
+.ui-modal { width: min(440px, 100%); background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 18px;
+  padding: 22px; box-shadow: 0 24px 60px rgba(0,0,0,.35); animation: cardIn .3s cubic-bezier(.2,.8,.2,1) both; }
+.ui-modal h3 { margin: 0 0 6px; font-size: 17px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+.ui-modal p { margin: 0 0 16px; font-size: 13.5px; color: var(--muted); }
+.ui-modal .opts { display: grid; gap: 10px; }
+.ui-modal .opt { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; height: auto; padding: 12px 14px; text-align: left; font-size: 15px; }
+.ui-modal .opt small { font-size: 12.5px; font-weight: 500; color: var(--muted); }
+.ui-modal .opt.primary small { color: rgba(255,255,255,.85); }
+.ui-modal .foot { display: flex; justify-content: flex-end; margin-top: 14px; }
 
 .zoom-wrap { width: max-content; margin: 0 auto; }
 
@@ -844,7 +883,7 @@ const UI_CSS = `
 @media print {
   html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; height: auto !important; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .no-print, .a4-measure, .doc-caret { display: none !important; }
+  .no-print, .a4-measure, .doc-caret, .ui-modal-bg, .edit-sheet { display: none !important; }
   .ui-root { background: #fff !important; min-height: 0 !important; }
   .ui-workspace, .ui-pane, .ui-pane.stage, .ui-pane.stage-scroll {
     display: block !important; position: static !important; height: auto !important; max-height: none !important;
@@ -880,6 +919,23 @@ function snapToCluster(text: string, index: number): number {
   return text.length;
 }
 
+/** เอา HTML เนื้อหาที่ผู้ใช้แก้ไขไว้ มาเติมค่าจากฟอร์ม/หัวกระดาษปัจจุบัน
+ *  ([data-field] = ช่องข้อมูลจากฟอร์ม, [data-co] = ชื่อบริษัท/ที่อยู่สำนักงาน) */
+function renderCustomHtml(html: string, d: FormData, co: Letterhead, active: FieldKey | null) {
+  if (typeof document === "undefined") return html;
+  const box = document.createElement("div");
+  box.innerHTML = html;
+  box.querySelectorAll<HTMLElement>("[data-field]").forEach((el) => {
+    const k = el.dataset.field as FieldKey;
+    el.textContent = d[k] || el.dataset.ph || DOTS;
+    el.classList.toggle("is-active", k === active);
+  });
+  box.querySelectorAll<HTMLElement>("[data-co]").forEach((el) => {
+    el.textContent = co[el.dataset.co as "company" | "office"];
+  });
+  return box.innerHTML;
+}
+
 export default function Home() {
   /* ---------- แท็บพนักงาน (1 แท็บ = 1 เอกสาร) ---------- */
   const [tabs, setTabs] = useState<DocTab[]>([{ id: "t0", data: INITIAL }]);
@@ -907,6 +963,13 @@ export default function Home() {
   const [fitZoom, setFitZoom] = useState(1);
   const [userZoom, setUserZoom] = useState<number | null>(null);
 
+  /* ---------- โหมดแก้ไขเนื้อหาเอกสาร (ปุ่มดินสอ) ---------- */
+  const [editing, setEditing] = useState(false);
+  const [editScope, setEditScope] = useState<"one" | "all">("one"); // แก้เฉพาะแท็บนี้ / ทุกแท็บ
+  const [scopeAsk, setScopeAsk] = useState<null | "edit" | "reset">(null); // กล่องถามขอบเขต
+  const editorRef = useRef<HTMLDivElement | null>(null);
+  const editInit = useRef("");
+
   const inputRefs = useRef<Record<string, HTMLInputElement | HTMLTextAreaElement | null>>({});
   const measureRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -922,14 +985,20 @@ export default function Home() {
       if (raw) {
         const saved = JSON.parse(raw);
         if (Array.isArray(saved?.tabs) && saved.tabs.length) {
-          const restored: DocTab[] = saved.tabs.map((t: { id?: unknown; data?: Record<string, unknown> }, i: number) => {
-            const data = { ...BLANK } as FormData;
-            (Object.keys(BLANK) as FieldKey[]).forEach((k) => {
-              const v = t?.data?.[k];
-              if (typeof v === "string") data[k] = v;
-            });
-            return { id: typeof t?.id === "string" ? t.id : `t${i}`, data };
-          });
+          const restored: DocTab[] = saved.tabs.map(
+            (t: { id?: unknown; data?: Record<string, unknown>; html?: unknown }, i: number) => {
+              const data = { ...BLANK } as FormData;
+              (Object.keys(BLANK) as FieldKey[]).forEach((k) => {
+                const v = t?.data?.[k];
+                if (typeof v === "string") data[k] = v;
+              });
+              return {
+                id: typeof t?.id === "string" ? t.id : `t${i}`,
+                data,
+                html: typeof t?.html === "string" ? t.html : undefined,
+              };
+            }
+          );
           setTabs(restored);
           setDocTabId(restored.some((t) => t.id === saved.activeId) ? saved.activeId : restored[0].id);
           const maxId = Math.max(0, ...restored.map((t) => Number(t.id.replace(/\D/g, "")) || 0));
@@ -994,6 +1063,8 @@ export default function Home() {
   /* ---------- จัดการแท็บ ---------- */
   const switchTab = (id: string) => {
     setDocTabId(id);
+    setEditing(false); // เปลี่ยนแท็บระหว่างแก้เนื้อหา = ยกเลิกการแก้ไข
+    setScopeAsk(null);
     setActiveField(null);
     setCaret(null);
   };
@@ -1004,7 +1075,7 @@ export default function Home() {
     PER_PERSON.forEach((k) => (blank[k] = ""));
     setTabs((ts) => {
       const i = ts.findIndex((t) => t.id === currentTab.id);
-      return [...ts.slice(0, i + 1), { id, data: blank }, ...ts.slice(i + 1)];
+      return [...ts.slice(0, i + 1), { id, data: blank, html: currentTab.html }, ...ts.slice(i + 1)];
     });
     switchTab(id);
   };
@@ -1032,6 +1103,7 @@ export default function Home() {
     const created: DocTab[] = names.slice(1).map((n) => ({
       id: `t${idCounter.current++}`,
       data: { ...base, employeeName: n },
+      html: currentTab.html,
     }));
     setTabs((ts) => {
       const i = ts.findIndex((t) => t.id === currentTab.id);
@@ -1127,7 +1199,7 @@ export default function Home() {
   // วัดใหม่ทุกครั้งที่ข้อมูลเปลี่ยน หรือสลับแท็บ
   useIsoLayoutEffect(() => {
     measure();
-  }, [formData, fontScale, letterhead, measure]);
+  }, [formData, fontScale, letterhead, currentTab.html, measure]);
 
   useEffect(() => {
     const fonts = document.fonts;
@@ -1210,12 +1282,134 @@ export default function Home() {
     return (
       <span
         className={`doc-field${active ? " is-active" : ""}`}
+        data-field={field}
+        data-ph={placeholder}
         title="คลิกเพื่อแก้ไขจุดนี้"
         onClick={() => handleDocumentClick(field)}
       >
         {content}
       </span>
     );
+  };
+
+  /** เนื้อหาเอกสาร: ถ้าแท็บนี้มีข้อความที่ผู้ใช้แก้ไขเอง (html) ใช้อันนั้น ไม่งั้นใช้ต้นฉบับ DocBody */
+  const renderBody = () =>
+    currentTab.html ? (
+      <div
+        onClick={(e) => {
+          const f = (e.target as HTMLElement).closest<HTMLElement>("[data-field]");
+          if (f?.dataset.field) handleDocumentClick(f.dataset.field as FieldKey);
+        }}
+        dangerouslySetInnerHTML={{
+          __html: renderCustomHtml(currentTab.html, formData, letterhead, activeField),
+        }}
+      />
+    ) : (
+      <DocBody d={formData} hl={hl} co={letterhead} />
+    );
+
+  /* ---------- แก้ไขเนื้อหาเอกสาร (ปุ่มดินสอ) ---------- */
+  /** ดึง HTML ต้นฉบับปัจจุบันจากตัววัดหน้า (ล้างเคอร์เซอร์/ไฮไลต์ออก) */
+  const getTemplateHtml = () => {
+    const box = document.createElement("div");
+    box.innerHTML = measureRef.current?.innerHTML ?? "";
+    box.querySelectorAll(".doc-caret").forEach((e) => e.remove());
+    box.querySelectorAll(".is-active").forEach((e) => e.classList.remove("is-active"));
+    return box.innerHTML.replace(/\u2060/g, "");
+  };
+
+  const startEdit = (scope: "one" | "all") => {
+    editInit.current = currentTab.html
+      ? renderCustomHtml(currentTab.html, formData, letterhead, null)
+      : getTemplateHtml();
+    setEditScope(scope);
+    setScopeAsk(null);
+    setActiveField(null);
+    setCaret(null);
+    setActiveTab("preview");
+    setEditing(true);
+  };
+
+  // ใส่เนื้อหาลงตัวแก้ไขครั้งเดียวตอนเปิดโหมด (ไม่ให้ React ควบคุม เพื่อไม่ให้เคอร์เซอร์เด้ง)
+  useIsoLayoutEffect(() => {
+    const el = editorRef.current;
+    if (!editing || !el) return;
+    el.innerHTML = editInit.current;
+    // โหมด "ทุกแท็บ": ช่องข้อมูลบนเอกสารพิมพ์แก้ได้ และค่าใหม่จะใช้กับทุกแท็บ (ยกเว้นช่องที่ล็อก)
+    // โหมด "เฉพาะแท็บนี้": ช่องข้อมูลเป็นก้อนแก้ไม่ได้ (แก้ที่ฟอร์มด้านซ้าย)
+    el.querySelectorAll<HTMLElement>("[data-field]").forEach((n) => {
+      const k = n.dataset.field as FieldKey;
+      if (editScope === "all" && !ALL_LOCKED.includes(k)) {
+        n.dataset.orig = n.textContent ?? "";
+        n.dataset.empty = formData[k] ? "" : "1";
+        n.title = "แก้ไขได้ · มีผลกับทุกแท็บ";
+        n.setAttribute("contenteditable", "true");
+      } else {
+        n.setAttribute("contenteditable", "false");
+      }
+    });
+    el.querySelectorAll("[data-co]").forEach((n) => n.setAttribute("contenteditable", "false"));
+    el.focus();
+  }, [editing]);
+
+  const saveEdit = () => {
+    const el = editorRef.current;
+    if (!el) return;
+    // โหมดทุกแท็บ: ช่องข้อมูลที่ถูกแก้บนเอกสาร → เก็บค่าใหม่ไว้ใช้กับทุกแท็บ
+    const changes: Partial<FormData> = {};
+    if (editScope === "all") {
+      el.querySelectorAll<HTMLElement>("[data-field][contenteditable='true']").forEach((s) => {
+        const k = s.dataset.field as FieldKey;
+        if (k in changes) return; // ช่องเดียวกันโผล่หลายที่ ใช้ที่แรกที่ถูกแก้
+        const text = (s.textContent ?? "").replace(/[\u00a0\u2060]/g, " ").replace(/\s*\n\s*/g, " ");
+        const isEmpty = s.dataset.empty === "1";
+        const cur = isEmpty ? text.split(s.dataset.ph ?? "").join("").trim() : text;
+        const orig = isEmpty ? "" : s.dataset.orig ?? "";
+        if (cur !== orig) changes[k] = cur;
+      });
+    }
+    const box = document.createElement("div");
+    box.innerHTML = el.innerHTML;
+    box.querySelectorAll("[contenteditable]").forEach((e) => e.removeAttribute("contenteditable"));
+    box.querySelectorAll("[data-orig],[data-empty]").forEach((e) => {
+      e.removeAttribute("data-orig");
+      e.removeAttribute("data-empty");
+    });
+    box.querySelectorAll<HTMLElement>("[style]").forEach((e) => {
+      if (e.tagName !== "COL") e.removeAttribute("style"); // ตัดสไตล์ที่เบราว์เซอร์แทรกระหว่างพิมพ์
+    });
+    box.querySelectorAll("font").forEach((f) => f.replaceWith(...Array.from(f.childNodes)));
+    // Chrome แทรก &nbsp; เวลาพิมพ์ช่องว่างท้ายคำ ซึ่งทำให้ตัดบรรทัดผิดไปจากต้นฉบับ → แปลงกลับเป็นช่องว่างปกติ
+    const html = box.innerHTML.replace(/&nbsp;/g, " ");
+    setTabs((ts) =>
+      ts.map((t) =>
+        editScope === "all"
+          ? { ...t, html, data: { ...t.data, ...changes } } // ทุกแท็บ: ข้อความ + ค่าช่องที่แก้
+          : t.id === currentTab.id
+          ? { ...t, html }
+          : t
+      )
+    );
+    setEditing(false);
+  };
+
+  /** คืนเนื้อหาเป็นต้นฉบับ (เฉพาะแท็บนี้ หรือทุกแท็บ) */
+  const resetCustom = (scope: "one" | "all") => {
+    setScopeAsk(null);
+    setTabs((ts) =>
+      ts.map((t) => (scope === "all" || t.id === currentTab.id ? { ...t, html: undefined } : t))
+    );
+  };
+
+  /** กดปุ่มดินสอ: ถ้ามีหลายแท็บให้ถามขอบเขตก่อน ถ้ามีแท็บเดียวเข้าโหมดแก้ไขเลย */
+  const onPencil = () => {
+    if (editing) return saveEdit();
+    if (tabs.length > 1) setScopeAsk("edit");
+    else startEdit("one");
+  };
+  const onReset = () => {
+    if (tabs.length > 1) setScopeAsk("reset");
+    else if (window.confirm("คืนเนื้อหาเอกสารเป็นข้อความต้นฉบับใช่หรือไม่?")) resetCustom("one");
   };
 
   const docStyle = {
@@ -1233,6 +1427,7 @@ export default function Home() {
   const allFields = SECTIONS.flatMap((s) => s.fields);
   const filled = allFields.filter((f) => formData[f.name].trim() !== "").length;
   const percent = Math.round((filled / allFields.length) * 100);
+  const anyCustom = tabs.some((t) => t.html);
 
   return (
     <div className="ui-root" data-theme={theme}>
@@ -1241,7 +1436,7 @@ export default function Home() {
       {/* ตัววัดจำนวนหน้า (ไม่แสดงผล) */}
       <div className="a4-measure doc-font" aria-hidden lang="th" style={docStyle}>
         <div ref={measureRef} className="a4-flow">
-          <DocBody d={formData} hl={hl} co={letterhead} />
+          {renderBody()}
         </div>
       </div>
 
@@ -1271,7 +1466,12 @@ export default function Home() {
           <button className="ui-btn icon" onClick={toggleTheme} title="สลับธีมสว่าง/มืด" aria-label="สลับธีม">
             {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
           </button>
-          <button className="ui-btn primary" onClick={handlePrint}>
+          <button
+            className="ui-btn primary"
+            onClick={handlePrint}
+            disabled={editing}
+            title={editing ? "บันทึกการแก้ไขเนื้อหาก่อนพิมพ์" : undefined}
+          >
             <Printer size={17} />
             <span className="lbl">ส่งออกเป็น PDF / พิมพ์</span>
           </button>
@@ -1405,72 +1605,163 @@ export default function Home() {
               <Eye size={17} style={{ color: "var(--ok)" }} />
               ตัวอย่างเอกสารจริง · {pageCount} หน้า A4
             </div>
-            <span className={`ui-chip${activeField ? " live" : ""}`}>
+            <span className={`ui-chip${activeField || editing ? " live" : ""}`}>
               <span className="dot" />
-              {activeField ? `กำลังพิมพ์: ${FIELD_LABELS[activeField]}` : "คลิกจุดไฮไลต์บนเอกสารเพื่อแก้ไข"}
+              {editing
+                ? editScope === "all"
+                  ? "กำลังแก้ไขเนื้อหา · ทุกแท็บ (ช่องไฮไลต์เหลืองแก้ได้ มีผลทุกแท็บ)"
+                  : "กำลังแก้ไขเนื้อหา · เฉพาะแท็บนี้ (ช่องไฮไลต์แก้ที่ฟอร์ม)"
+                : activeField
+                ? `กำลังพิมพ์: ${FIELD_LABELS[activeField]}`
+                : "คลิกจุดไฮไลต์บนเอกสารเพื่อแก้ไข"}
             </span>
             <div className="ui-tools">
-            <div className="ui-lh" role="group" aria-label="เลือกหัวกระดาษ">
-              <LayoutTemplate size={15} />
-              <div
-                className="ui-lh-track"
-                style={{ "--i": LETTERHEADS.findIndex((l) => l.id === letterhead.id) } as React.CSSProperties}
-              >
-                <i className="ind" />
-                {LETTERHEADS.map((l) => (
-                  <button
-                    key={l.id}
-                    className={l.id === letterhead.id ? "on" : ""}
-                    onClick={() => chooseLetterhead(l.id)}
-                    title={`ใช้หัว-ท้ายกระดาษ ${l.label}`}
-                  >
-                    {l.label}
-                  </button>
-                ))}
+              <div className="ui-lh" role="group" aria-label="เลือกหัวกระดาษ">
+                <LayoutTemplate size={15} />
+                <div
+                  className="ui-lh-track"
+                  style={{ "--i": LETTERHEADS.findIndex((l) => l.id === letterhead.id) } as React.CSSProperties}
+                >
+                  <i className="ind" />
+                  {LETTERHEADS.map((l) => (
+                    <button
+                      key={l.id}
+                      className={l.id === letterhead.id ? "on" : ""}
+                      onClick={() => chooseLetterhead(l.id)}
+                      title={`ใช้หัว-ท้ายกระดาษ ${l.label}`}
+                    >
+                      {l.label}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-            <div className="ui-zoom">
-              <button className="ui-btn sm" onClick={() => stepZoom(-1)} aria-label="ย่อ">
-                <ZoomOut size={15} />
-              </button>
-              <span className="pct">{Math.round(zoom * 100)}%</span>
-              <button className="ui-btn sm" onClick={() => stepZoom(1)} aria-label="ขยาย">
-                <ZoomIn size={15} />
-              </button>
-              <button className="ui-btn sm txt" onClick={() => setUserZoom(null)}>
-                พอดี
-              </button>
-            </div>
+
+              {/* ปุ่มดินสอ: แก้ไขเนื้อหาเอกสาร */}
+              <div className="ui-editgrp">
+                <button
+                  className={`ui-btn sm${editing ? " on" : ""}`}
+                  onClick={onPencil}
+                  title={editing ? "บันทึกการแก้ไขเนื้อหา" : "แก้ไขเนื้อหาเอกสาร"}
+                  aria-label={editing ? "บันทึกการแก้ไขเนื้อหา" : "แก้ไขเนื้อหาเอกสาร"}
+                >
+                  {editing ? <Check size={15} /> : <Pencil size={15} />}
+                </button>
+                {editing && (
+                  <button className="ui-btn sm txt" onClick={() => setEditing(false)}>
+                    ยกเลิก
+                  </button>
+                )}
+                {!editing && anyCustom && (
+                  <button className="ui-btn sm txt danger" onClick={onReset} title="คืนเนื้อหาเอกสารเป็นข้อความต้นฉบับ">
+                    คืนค่าเดิม
+                  </button>
+                )}
+              </div>
+
+              <div className="ui-zoom">
+                <button className="ui-btn sm" onClick={() => stepZoom(-1)} aria-label="ย่อ">
+                  <ZoomOut size={15} />
+                </button>
+                <span className="pct">{Math.round(zoom * 100)}%</span>
+                <button className="ui-btn sm" onClick={() => stepZoom(1)} aria-label="ขยาย">
+                  <ZoomIn size={15} />
+                </button>
+                <button className="ui-btn sm txt" onClick={() => setUserZoom(null)}>
+                  พอดี
+                </button>
+              </div>
             </div>
           </div>
 
           <div ref={stageRef} className="ui-pane stage-scroll">
             <div className="zoom-wrap" style={{ zoom }}>
-              <div className="pages">
-                {Array.from({ length: pageCount }, (_, i) => (
-                  <section key={i} className="a4-page doc-font" lang="th" style={docStyle}>
-                    {prevLh && (
-                      <>
-                        <img className="a4-head out" src={prevLh.head} alt="" draggable={false}
-                          style={{ top: `${prevLh.headTop}mm`, width: `${prevLh.headW}mm`, left: `calc(50% + ${prevLh.dx ?? 0}mm)` }} />
-                        <img className="a4-foot out" src={prevLh.foot} alt="" draggable={false}
-                          style={{ width: `${prevLh.footW}mm`, bottom: `${prevLh.footBottom ?? FOOT_BOTTOM_MM}mm`, left: `calc(50% + ${prevLh.dx ?? 0}mm)` }} />
-                      </>
-                    )}
-                    <img key={`h${swapN}`} className={`a4-head${swapN ? " in" : ""}`} src={letterhead.head} alt="" draggable={false} />
-                    <img key={`f${swapN}`} className={`a4-foot${swapN ? " in" : ""}`} src={letterhead.foot} alt="" draggable={false} />
-                    <div key={`v${swapN}`} className={`a4-viewport${swapN ? " lh-swap" : ""}`}>
-                      <div className="a4-flow" style={{ transform: `translateX(-${i * STEP_MM}mm)` }}>
-                        <DocBody d={formData} hl={hl} co={letterhead} />
+              {editing ? (
+                <section className="edit-sheet doc-font" lang="th" style={docStyle}>
+                  <div
+                    ref={editorRef}
+                    className="a4-flow"
+                    contentEditable
+                    suppressContentEditableWarning
+                    spellCheck={false}
+                    onKeyDown={(e) => {
+                      // ในช่องข้อมูล ห้ามขึ้นบรรทัดใหม่ (ค่าในช่องต้องเป็นบรรทัดเดียว)
+                      if (e.key === "Enter" && (e.target as HTMLElement).closest?.("[data-field]")) e.preventDefault();
+                    }}
+                    onPaste={(e) => {
+                      e.preventDefault(); // วางเป็นข้อความล้วน ไม่เอาสไตล์จากที่อื่นมา
+                      document.execCommand("insertText", false, e.clipboardData.getData("text/plain"));
+                    }}
+                  />
+                </section>
+              ) : (
+                <div className="pages">
+                  {Array.from({ length: pageCount }, (_, i) => (
+                    <section key={i} className="a4-page doc-font" lang="th" style={docStyle}>
+                      {prevLh && (
+                        <>
+                          <img className="a4-head out" src={prevLh.head} alt="" draggable={false}
+                            style={{ top: `${prevLh.headTop}mm`, width: `${prevLh.headW}mm`, left: `calc(50% + ${prevLh.dx ?? 0}mm)` }} />
+                          <img className="a4-foot out" src={prevLh.foot} alt="" draggable={false}
+                            style={{ width: `${prevLh.footW}mm`, bottom: `${prevLh.footBottom ?? FOOT_BOTTOM_MM}mm`, left: `calc(50% + ${prevLh.dx ?? 0}mm)` }} />
+                        </>
+                      )}
+                      <img key={`h${swapN}`} className={`a4-head${swapN ? " in" : ""}`} src={letterhead.head} alt="" draggable={false} />
+                      <img key={`f${swapN}`} className={`a4-foot${swapN ? " in" : ""}`} src={letterhead.foot} alt="" draggable={false} />
+                      <div key={`v${swapN}`} className={`a4-viewport${swapN ? " lh-swap" : ""}`}>
+                        <div className="a4-flow" style={{ transform: `translateX(-${i * STEP_MM}mm)` }}>
+                          {renderBody()}
+                        </div>
                       </div>
-                    </div>
-                  </section>
-                ))}
-              </div>
+                    </section>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
       </div>
+
+      {/* กล่องถามขอบเขต: แก้ไข/คืนค่าเดิม เฉพาะแท็บนี้ หรือทุกแท็บ */}
+      {scopeAsk && (
+        <div className="ui-modal-bg no-print" onClick={() => setScopeAsk(null)}>
+          <div className="ui-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <h3>
+              <Pencil size={18} style={{ color: "var(--accent)" }} />
+              {scopeAsk === "edit" ? "แก้ไขเนื้อหาเอกสาร" : "คืนเนื้อหาเป็นต้นฉบับ"}
+            </h3>
+            <p>
+              {scopeAsk === "edit"
+                ? "ต้องการให้การแก้ไขมีผลกับแท็บใด? (โหมดทุกแท็บ: แก้ช่องข้อมูลบนเอกสาร เช่น วันที่ ก็มีผลทุกแท็บ ยกเว้นช่องเฉพาะบุคคล เช่น ชื่อ ที่อยู่ ทะเบียน)"
+                : "ต้องการคืนข้อความต้นฉบับให้แท็บใด? (ข้อมูลในฟอร์มจะไม่ถูกลบ)"}
+            </p>
+            <div className="opts">
+              <button
+                className="ui-btn opt primary"
+                onClick={() => (scopeAsk === "edit" ? startEdit("one") : resetCustom("one"))}
+              >
+                {scopeAsk === "edit" ? "แก้ไขเฉพาะแท็บนี้" : "เฉพาะแท็บนี้"}
+                <small>{currentTab.data.employeeName.trim() || "แท็บปัจจุบัน"}</small>
+              </button>
+              <button
+                className="ui-btn opt"
+                onClick={() => (scopeAsk === "edit" ? startEdit("all") : resetCustom("all"))}
+              >
+                {scopeAsk === "edit" ? "แก้ไขแท็บทั้งหมด" : "ทุกแท็บ"}
+                <small>
+                  {scopeAsk === "edit"
+                    ? `ใช้ข้อความที่แก้กับทั้ง ${tabs.length} แท็บ (เริ่มจากเนื้อหาของแท็บนี้)`
+                    : `คืนต้นฉบับให้ทั้ง ${tabs.length} แท็บ`}
+                </small>
+              </button>
+            </div>
+            <div className="foot">
+              <button className="ui-btn sm txt" onClick={() => setScopeAsk(null)}>
+                ยกเลิก
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
