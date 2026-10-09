@@ -33,21 +33,26 @@ const M_LEFT = 25.4;
 type Letterhead = {
   id: string; label: string; company: string; office: string; head: string; foot: string;
   headW: number; footW: number; headTop: number; mTop: number; mBottom: number;
+  dx?: number; // เลื่อนรูปหัว/ท้ายตามแนวนอน (มม.) จากกึ่งกลางกระดาษ บวก = ไปทางขวา (ใช้คู่กับ headW/footW = CONTENT_W เพื่อให้ขอบรูปตรงกับขอบข้อความ)
   footBottom?: number; // ระยะรูปท้ายจากขอบล่างกระดาษ (มม.) ยิ่งมากรูปยิ่งขยับขึ้น (ถ้าไม่ระบุใช้ FOOT_BOTTOM_MM) ควรเพิ่ม mBottom ตามไปด้วย
 };
+const CONTENT_X_MM = (M_LEFT - M_RIGHT) / 2; // ศูนย์กลางพื้นที่เนื้อหาอยู่ห่างจากกึ่งกลางกระดาษไปทางขวา (0.55 มม.)
 const LETTERHEADS: Letterhead[] = [
   { id: "com7", label: "COM7", company: "บริษัท คอมเซเว่น จำกัด (มหาชน)",
     office: "สำนักงาน ตั้งอยู่เลขที่ 549/1 ถนนสรรพาวุธ แขวงบางนาใต้ เขตบางนา กรุงเทพมหานคร",
     head: "/img/com/com7head.png", foot: "/img/com/com7foot.png",
-    headW: 210, footW: 210, headTop: 0, mTop: M_TOP, mBottom: M_BOTTOM },
+    headW: PAGE_W - M_LEFT - M_RIGHT, footW: PAGE_W - M_LEFT - M_RIGHT, dx: CONTENT_X_MM, // รูปกว้างเท่าพื้นที่เนื้อหา ขอบซ้าย-ขวาตรงกับตัวหนังสือ สัดส่วนรูปคงเดิม
+    headTop: 8, mTop: 40, mBottom: 36, footBottom: 6 }, // ระยะจากขอบกระดาษเท่ากับ SEE
   { id: "ufun", label: "UFUN", company: "บริษัท ยูฟัน แคปปิตอล จำกัด",
     office: "สำนักงาน ตั้งอยู่เลขที่ 549/1 ถนนสรรพาวุธ แขวงบางนาใต้ เขตบางนา กรุงเทพมหานคร", // TODO: แก้เป็นที่อยู่สำนักงานของ ยูฟัน แคปปิตอล
     head: "/img/ufun/ufunhead.png", foot: "/img/ufun/ufunfoot.png",
-    headW: 210, footW: 210, headTop: 8, mTop: 40, mBottom: 30 },
+    headW: PAGE_W - M_LEFT - M_RIGHT, footW: PAGE_W - M_LEFT - M_RIGHT, dx: CONTENT_X_MM, // รูปกว้างเท่าพื้นที่เนื้อหา ขอบซ้าย-ขวาตรงกับตัวหนังสือ
+    headTop: 8, mTop: 40, mBottom: 36, footBottom: 6 }, // ระยะจากขอบกระดาษเท่ากับ SEE
   { id: "see", label: "SEE", company: "บริษัท ซี โนว์ ฮาว จำกัด",
     office: "สำนักงาน ตั้งอยู่เลขที่ 549/1 ถนนสรรพาวุธ แขวงบางนาใต้ เขตบางนา กรุงเทพมหานคร", // TODO: แก้เป็นที่อยู่สำนักงานของ ซี โนว์ ฮาว
     head: "/img/see/seehead.png", foot: "/img/see/seefoot.png",
-    headW: 210, footW: 210, headTop: 8, mTop: 40, mBottom: 36, footBottom: 6 }, // หัวขยับลง 8 มม. / ท้ายขยับขึ้น 6 มม. (ปรับได้)
+    headW: PAGE_W - M_LEFT - M_RIGHT, footW: PAGE_W - M_LEFT - M_RIGHT, dx: CONTENT_X_MM, // รูปกว้างเท่าพื้นที่เนื้อหา (160.3 มม.) ขอบซ้าย-ขวาตรงกับตัวหนังสือ สัดส่วนรูปคงเดิม
+    headTop: 8, mTop: 40, mBottom: 36, footBottom: 6 }, // หัวขยับลง 8 มม. / ท้ายขยับขึ้น 6 มม. (ปรับได้)
 ];
 const FOOT_BOTTOM_MM = 0; // ระยะรูปท้ายจากขอบล่างกระดาษ
 const CONTENT_W = +(PAGE_W - M_LEFT - M_RIGHT).toFixed(2); // 160.3 mm
@@ -592,7 +597,7 @@ const DOC_CSS = `
   animation: pageIn .5s cubic-bezier(.2,.8,.2,1) both;
 }
 .a4-page:last-child { margin-bottom: 0; break-after: auto; page-break-after: auto; }
-.a4-head, .a4-foot { position: absolute; left: 50%; transform: translateX(-50%); height: auto; display: block;
+.a4-head, .a4-foot { position: absolute; left: calc(50% + var(--lh-dx, 0mm)); transform: translateX(-50%); height: auto; display: block;
   max-width: none; pointer-events: none; user-select: none; -webkit-user-drag: none; }
 .a4-head { top: var(--head-top); width: var(--head-w); }
 .a4-head.in { animation: lhHeadIn .55s cubic-bezier(.2,.8,.2,1) both; }
@@ -1222,6 +1227,7 @@ export default function Home() {
     "--head-top": `${letterhead.headTop}mm`,
     "--foot-w": `${letterhead.footW}mm`,
     "--foot-bottom": `${letterhead.footBottom ?? FOOT_BOTTOM_MM}mm`,
+    "--lh-dx": `${letterhead.dx ?? 0}mm`,
   } as React.CSSProperties;
 
   const allFields = SECTIONS.flatMap((s) => s.fields);
@@ -1446,9 +1452,9 @@ export default function Home() {
                     {prevLh && (
                       <>
                         <img className="a4-head out" src={prevLh.head} alt="" draggable={false}
-                          style={{ top: `${prevLh.headTop}mm`, width: `${prevLh.headW}mm` }} />
+                          style={{ top: `${prevLh.headTop}mm`, width: `${prevLh.headW}mm`, left: `calc(50% + ${prevLh.dx ?? 0}mm)` }} />
                         <img className="a4-foot out" src={prevLh.foot} alt="" draggable={false}
-                          style={{ width: `${prevLh.footW}mm`, bottom: `${prevLh.footBottom ?? FOOT_BOTTOM_MM}mm` }} />
+                          style={{ width: `${prevLh.footW}mm`, bottom: `${prevLh.footBottom ?? FOOT_BOTTOM_MM}mm`, left: `calc(50% + ${prevLh.dx ?? 0}mm)` }} />
                       </>
                     )}
                     <img key={`h${swapN}`} className={`a4-head${swapN ? " in" : ""}`} src={letterhead.head} alt="" draggable={false} />
