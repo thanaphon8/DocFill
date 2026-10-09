@@ -1438,11 +1438,17 @@ export default function Home() {
     setEditing(false);
   };
 
-  /** คืนเนื้อหาเป็นต้นฉบับ (เฉพาะแท็บนี้ หรือทุกแท็บ) */
+  /** คืนค่าเดิม: ข้อความเอกสารกลับเป็นต้นฉบับ + ข้อมูลในฟอร์มกลับเป็นข้อมูลตัวอย่างเหมือนเปิดใช้ครั้งแรก
+   *  (เฉพาะแท็บนี้ หรือทุกแท็บ) */
   const resetCustom = (scope: "one" | "all") => {
     setScopeAsk(null);
+    dropUndo();
+    setActiveField(null);
+    setCaret(null);
     setTabs((ts) =>
-      ts.map((t) => (scope === "all" || t.id === currentTab.id ? { ...t, html: undefined } : t))
+      ts.map((t) =>
+        scope === "all" || t.id === currentTab.id ? { ...t, html: undefined, data: { ...INITIAL } } : t
+      )
     );
   };
 
@@ -1454,7 +1460,7 @@ export default function Home() {
   };
   const onReset = () => {
     if (tabs.length > 1) setScopeAsk("reset");
-    else if (window.confirm("คืนเนื้อหาเอกสารเป็นข้อความต้นฉบับใช่หรือไม่?")) resetCustom("one");
+    else if (window.confirm("คืนค่าเดิมใช่หรือไม่?\nข้อความเอกสารจะกลับเป็นต้นฉบับ และข้อมูลในฟอร์มจะกลับเป็นข้อมูลตัวอย่าง")) resetCustom("one");
   };
 
   const docStyle = {
@@ -1472,7 +1478,10 @@ export default function Home() {
   const allFields = SECTIONS.flatMap((s) => s.fields);
   const filled = allFields.filter((f) => formData[f.name].trim() !== "").length;
   const percent = Math.round((filled / allFields.length) * 100);
-  const anyCustom = tabs.some((t) => t.html);
+  // มีอะไรต่างจากค่าเริ่มต้น (ข้อความเอกสารที่แก้ หรือข้อมูลในฟอร์มที่ไม่ใช่ข้อมูลตัวอย่าง) จึงแสดงปุ่ม "คืนค่าเดิม"
+  const anyCustom = tabs.some(
+    (t) => t.html || (Object.keys(INITIAL) as FieldKey[]).some((k) => t.data[k] !== INITIAL[k])
+  );
 
   return (
     <div className="ui-root" data-theme={theme}>
@@ -1697,7 +1706,7 @@ export default function Home() {
                   </button>
                 )}
                 {!editing && anyCustom && (
-                  <button className="ui-btn sm txt danger" onClick={onReset} title="คืนเนื้อหาเอกสารเป็นข้อความต้นฉบับ">
+                  <button className="ui-btn sm txt danger" onClick={onReset} title="คืนค่าเดิม: ข้อความต้นฉบับ + ข้อมูลตัวอย่างเหมือนเปิดใช้ครั้งแรก">
                     คืนค่าเดิม
                   </button>
                 )}
@@ -1787,7 +1796,7 @@ export default function Home() {
             <p>
               {scopeAsk === "edit"
                 ? "ต้องการให้การแก้ไขมีผลกับแท็บใด? (โหมดทุกแท็บ: แก้ช่องข้อมูลบนเอกสาร เช่น วันที่ ก็มีผลทุกแท็บ ยกเว้นช่องเฉพาะบุคคล เช่น ชื่อ ที่อยู่ ทะเบียน)"
-                : "ต้องการคืนข้อความต้นฉบับให้แท็บใด? (ข้อมูลในฟอร์มจะไม่ถูกลบ)"}
+                : "ต้องการคืนค่าเดิมให้แท็บใด? ข้อความเอกสารจะกลับเป็นต้นฉบับ และข้อมูลในฟอร์มจะถูกแทนที่ด้วยข้อมูลตัวอย่างเหมือนเปิดใช้ครั้งแรก"}
             </p>
             <div className="opts">
               <button
@@ -1805,7 +1814,7 @@ export default function Home() {
                 <small>
                   {scopeAsk === "edit"
                     ? `ใช้ข้อความที่แก้กับทั้ง ${tabs.length} แท็บ (เริ่มจากเนื้อหาของแท็บนี้)`
-                    : `คืนต้นฉบับให้ทั้ง ${tabs.length} แท็บ`}
+                    : `คืนค่าเดิมให้ทั้ง ${tabs.length} แท็บ (ข้อมูลของทุกแท็บจะเป็นข้อมูลตัวอย่าง)`}
                 </small>
               </button>
             </div>
