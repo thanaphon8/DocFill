@@ -65,6 +65,10 @@ const LINE_PT = 18.4; // ระยะบรรทัด (single spacing ขอ�
 const INDENT_MM = 12.7; // ย่อหน้าบรรทัดแรก 720 twips
 const SIGN_W_MM = 85; // ความกว้างบล็อกลายเซ็นทุกอัน (เท่ากันหมด) → เส้นลงชื่อยาวเท่ากัน และจัดกึ่งกลางหน้า (ไม่เกิน CONTENT_W)
 
+/** ขอบเขตการซูมหน้าเอกสาร */
+const ZOOM_MIN = 0.3;
+const ZOOM_MAX = 1.6;
+
 /** ถ้าเครื่องไม่มีฟอนต์ TH Sarabun จะใช้ Google "Sarabun" ซึ่งตัวใหญ่กว่า จึงย่อลงเล็กน้อย
  *  (ค่าประมาณ — ถ้าวางไฟล์ฟอนต์ใน /public/fonts จะไม่ต้องใช้ค่านี้) */
 const FALLBACK_SCALE = 0.85;
@@ -781,7 +785,7 @@ const UI_CSS = `
 .ui-workspace { display: grid; grid-template-columns: minmax(340px, 440px) minmax(0, 1fr); gap: 20px; padding: 20px 24px; height: calc(100vh - 64px - 44px); }
 .ui-pane { min-height: 0; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; scrollbar-width: thin; scrollbar-color: var(--border) transparent; padding-right: 4px; }
 .ui-pane.stage { overflow: auto; padding: 0; border-radius: 16px; background: var(--stage); border: 1px solid var(--border); transition: background .35s; display: flex; flex-direction: column; }
-.ui-pane.stage-scroll { flex: 1; min-height: 0; overflow: auto; scroll-behavior: smooth; padding: 22px 16px 40px; }
+.ui-pane.stage-scroll { flex: 1; min-height: 0; overflow: auto; scroll-behavior: smooth; padding: 22px 16px 40px; overscroll-behavior: contain; }
 
 /* โหมดแก้ไขเนื้อหาเอกสาร: ซ่อนฟอร์ม ให้หน้าเอกสารใช้พื้นที่เต็มความกว้าง */
 .ui-workspace.is-editing { grid-template-columns: minmax(0, 1fr); }
@@ -1014,6 +1018,9 @@ export default function Home() {
   const lastFieldRef = useRef<FieldKey | null>(null);
 
   const zoom = userZoom ?? fitZoom;
+  // เก็บค่าซูมล่าสุดไว้ให้ตัวดักล้อเมาส์ (ผูกครั้งเดียว) อ่านได้ โดยไม่ต้องผูกใหม่ทุกครั้งที่ซูมเปลี่ยน
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
 
   /* ---------- จำข้อมูลที่กรอก: โหลดตอนเปิดหน้า / บันทึกทุกครั้งที่แก้ ---------- */
   const [hydrated, setHydrated] = useState(false);
@@ -1260,14 +1267,38 @@ export default function Home() {
     if (!el || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(([entry]) => {
       const w = entry.contentRect.width - 36;
-      if (w > 0) setFitZoom(Math.min(1, Math.max(0.3, w / (PAGE_W * MM_PX))));
+      if (w > 0) setFitZoom(Math.min(1, Math.max(ZOOM_MIN, w / (PAGE_W * MM_PX))));
     });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
   const stepZoom = (dir: 1 | -1) =>
-    setUserZoom(Math.min(1.6, Math.max(0.3, +(zoom + dir * 0.1).toFixed(2))));
+    setUserZoom(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, +(zoom + dir * 0.1).toFixed(2))));
+
+  /* ---------- Ctrl + ล้อเมาส์ (หรือ pinch บนทัชแพด) = ซูมเฉพาะช่องแสดงเอกสาร ----------
+     ต้องผูกด้วย addEventListener แบบ passive:false เพราะ onWheel ของ React เป็น passive
+     จึงเรียก preventDefault() ไม่ได้ → เบราว์เซอร์จะซูมทั้งหน้าเว็บแทน */
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return; // ไม่กด Ctrl = เลื่อนเอกสารตามปกติ
+      e.preventDefault(); // กันเบราว์เซอร์ซูมทั้งหน้า
+      e.stopPropagation();
+      // deltaMode: 0 = พิกเซล, 1 = บรรทัด, 2 = หน้า
+      const unit = e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 100 : 1;
+      const delta = e.deltaY * unit;
+      if (!delta) return;
+      // ซูมแบบสัดส่วน: ล้อเมาส์ 1 คลิก (~100) ≈ 18% / pinch ทัชแพดได้ค่าเล็กๆ จึงลื่นไหล
+      const next = zoomRef.current * Math.exp(-delta * 0.002);
+      const clamped = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, +next.toFixed(3)));
+      zoomRef.current = clamped;
+      setUserZoom(clamped);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
 
   /* ---------- เลื่อนเอกสารตามเคอร์เซอร์ให้อยู่ในสายตาเสมอ ---------- */
   useEffect(() => {
@@ -1438,17 +1469,11 @@ export default function Home() {
     setEditing(false);
   };
 
-  /** คืนค่าเดิม: ข้อความเอกสารกลับเป็นต้นฉบับ + ข้อมูลในฟอร์มกลับเป็นข้อมูลตัวอย่างเหมือนเปิดใช้ครั้งแรก
-   *  (เฉพาะแท็บนี้ หรือทุกแท็บ) */
+  /** คืนเนื้อหาเป็นต้นฉบับ (เฉพาะแท็บนี้ หรือทุกแท็บ) */
   const resetCustom = (scope: "one" | "all") => {
     setScopeAsk(null);
-    dropUndo();
-    setActiveField(null);
-    setCaret(null);
     setTabs((ts) =>
-      ts.map((t) =>
-        scope === "all" || t.id === currentTab.id ? { ...t, html: undefined, data: { ...INITIAL } } : t
-      )
+      ts.map((t) => (scope === "all" || t.id === currentTab.id ? { ...t, html: undefined } : t))
     );
   };
 
@@ -1460,7 +1485,7 @@ export default function Home() {
   };
   const onReset = () => {
     if (tabs.length > 1) setScopeAsk("reset");
-    else if (window.confirm("คืนค่าเดิมใช่หรือไม่?\nข้อความเอกสารจะกลับเป็นต้นฉบับ และข้อมูลในฟอร์มจะกลับเป็นข้อมูลตัวอย่าง")) resetCustom("one");
+    else if (window.confirm("คืนเนื้อหาเอกสารเป็นข้อความต้นฉบับใช่หรือไม่?")) resetCustom("one");
   };
 
   const docStyle = {
@@ -1478,10 +1503,7 @@ export default function Home() {
   const allFields = SECTIONS.flatMap((s) => s.fields);
   const filled = allFields.filter((f) => formData[f.name].trim() !== "").length;
   const percent = Math.round((filled / allFields.length) * 100);
-  // มีอะไรต่างจากค่าเริ่มต้น (ข้อความเอกสารที่แก้ หรือข้อมูลในฟอร์มที่ไม่ใช่ข้อมูลตัวอย่าง) จึงแสดงปุ่ม "คืนค่าเดิม"
-  const anyCustom = tabs.some(
-    (t) => t.html || (Object.keys(INITIAL) as FieldKey[]).some((k) => t.data[k] !== INITIAL[k])
-  );
+  const anyCustom = tabs.some((t) => t.html);
 
   return (
     <div className="ui-root" data-theme={theme}>
@@ -1706,7 +1728,7 @@ export default function Home() {
                   </button>
                 )}
                 {!editing && anyCustom && (
-                  <button className="ui-btn sm txt danger" onClick={onReset} title="คืนค่าเดิม: ข้อความต้นฉบับ + ข้อมูลตัวอย่างเหมือนเปิดใช้ครั้งแรก">
+                  <button className="ui-btn sm txt danger" onClick={onReset} title="คืนเนื้อหาเอกสารเป็นข้อความต้นฉบับ">
                     คืนค่าเดิม
                   </button>
                 )}
@@ -1796,7 +1818,7 @@ export default function Home() {
             <p>
               {scopeAsk === "edit"
                 ? "ต้องการให้การแก้ไขมีผลกับแท็บใด? (โหมดทุกแท็บ: แก้ช่องข้อมูลบนเอกสาร เช่น วันที่ ก็มีผลทุกแท็บ ยกเว้นช่องเฉพาะบุคคล เช่น ชื่อ ที่อยู่ ทะเบียน)"
-                : "ต้องการคืนค่าเดิมให้แท็บใด? ข้อความเอกสารจะกลับเป็นต้นฉบับ และข้อมูลในฟอร์มจะถูกแทนที่ด้วยข้อมูลตัวอย่างเหมือนเปิดใช้ครั้งแรก"}
+                : "ต้องการคืนข้อความต้นฉบับให้แท็บใด? (ข้อมูลในฟอร์มจะไม่ถูกลบ)"}
             </p>
             <div className="opts">
               <button
@@ -1814,7 +1836,7 @@ export default function Home() {
                 <small>
                   {scopeAsk === "edit"
                     ? `ใช้ข้อความที่แก้กับทั้ง ${tabs.length} แท็บ (เริ่มจากเนื้อหาของแท็บนี้)`
-                    : `คืนค่าเดิมให้ทั้ง ${tabs.length} แท็บ (ข้อมูลของทุกแท็บจะเป็นข้อมูลตัวอย่าง)`}
+                    : `คืนต้นฉบับให้ทั้ง ${tabs.length} แท็บ`}
                 </small>
               </button>
             </div>
