@@ -52,7 +52,7 @@ const BLEED = 10; // mm เผื่อให้ตารางที่กว�
 const FONT_PT = 16; // ขนาดตัวอักษรเนื้อหา
 const LINE_PT = 18.4; // ระยะบรรทัด (single spacing ของ TH Sarabun 16pt)
 const INDENT_MM = 12.7; // ย่อหน้าบรรทัดแรก 720 twips
-const SIGN_INDENT_MM = 50.8; // บล็อกลายเซ็น (2160 + 720 twips)
+const SIGN_W_MM = 85; // ความกว้างบล็อกลายเซ็นทุกอัน (เท่ากันหมด) → เส้นลงชื่อยาวเท่ากัน และจัดกึ่งกลางหน้า (ไม่เกิน CONTENT_W)
 
 /** ถ้าเครื่องไม่มีฟอนต์ TH Sarabun จะใช้ Google "Sarabun" ซึ่งตัวใหญ่กว่า จึงย่อลงเล็กน้อย
  *  (ค่าประมาณ — ถ้าวางไฟล์ฟอนต์ใน /public/fonts จะไม่ต้องใช้ค่านี้) */
@@ -183,6 +183,15 @@ type Highlight = (field: FieldKey, placeholder?: string) => React.ReactNode;
 
 const DOTS = "........................";
 const DOTS_LONG = "....................................................";
+
+/** แถวลงชื่อ: "ลงชื่อ ........ ตำแหน่ง" เส้นประยืดเต็มความกว้างบล็อก → ทุกช่องยาวเท่ากัน */
+const SigLine = ({ role }: { role: string }) => (
+  <div className="d-sig-line">
+    <span className="lbl">ลงชื่อ</span>
+    <span className="ln" />
+    <span className="role">{role}</span>
+  </div>
+);
 
 /* =====================================================================
  * เนื้อหาเอกสาร — ถูก render ซ้ำหลายสำเนา (หนึ่งสำเนาต่อหนึ่งหน้า A4)
@@ -503,15 +512,17 @@ function DocBody({ d, hl, co }: { d: FormData; hl: Highlight; co: Letterhead }) 
       </p>
       <Blank />
 
-      {/* ลายมือชื่อ — จัดเรียงตามต้นฉบับ (ซ้อนลงมา เยื้องซ้าย 50.8 มม.) และไม่ให้ขาดข้ามหน้า */}
+      {/* ลายมือชื่อ — ทุกบล็อกกว้างเท่ากัน เส้นลงชื่อยาวเท่ากัน ชื่อในวงเล็บอยู่กึ่งกลางตรงกัน และไม่ให้ขาดข้ามหน้า */}
       <div className="d-sigblock">
         <div className="d-sig">
-          <p>ลงชื่อ………………………………พนักงาน</p>
+          <div className="d-sig-space" />
+          <SigLine role="พนักงาน" />
           <p>( {hl("employeeName", DOTS_LONG)} )</p>
         </div>
         <Blank />
         <div className="d-sig">
-          <p>ลงชื่อ…………………ผู้บังคับบัญชา/พยาน</p>
+          <div className="d-sig-space" />
+          <SigLine role="ผู้บังคับบัญชา/พยาน" />
           <p>( {hl("supervisorName", DOTS_LONG)} )</p>
         </div>
         <Blank />
@@ -519,18 +530,20 @@ function DocBody({ d, hl, co }: { d: FormData; hl: Highlight; co: Letterhead }) 
           <p>
             <b>{co.company}</b>
           </p>
-          <Blank />
-          <p>ลงชื่อ………………………………บริษัท</p>
+          <div className="d-sig-space" />
+          <SigLine role="บริษัท" />
           <p>( {hl("companySignerName", DOTS_LONG)} )</p>
         </div>
         <Blank />
         <div className="d-sig">
-          <p>ลงชื่อ………………………………พยาน</p>
+          <div className="d-sig-space" />
+          <SigLine role="พยาน" />
           <p>( {hl("witness1Name", DOTS_LONG)} )</p>
         </div>
         <Blank />
         <div className="d-sig">
-          <p>ลงชื่อ………………………………พยาน</p>
+          <div className="d-sig-space" />
+          <SigLine role="พยาน" />
           <p>( {hl("witness2Name", DOTS_LONG)} )</p>
         </div>
       </div>
@@ -608,8 +621,14 @@ const DOC_CSS = `
 .d-table td.lbl { text-align: center; }
 .d-table tr { break-inside: avoid; }
 .d-sigblock { break-inside: avoid; text-align: left; }
-.d-sig { margin-left: ${SIGN_INDENT_MM}mm; width: max-content; max-width: calc(100% - ${SIGN_INDENT_MM}mm); text-align: center; }
+.d-sig { margin-left: auto; margin-right: auto; width: ${SIGN_W_MM}mm; max-width: 100%; text-align: center; break-inside: avoid; }
 .d-sig p { overflow-wrap: anywhere; }
+.d-sig-line { position: relative; white-space: nowrap; }
+.d-sig-line .ln { display: block; border-bottom: 0.5pt dotted #000; height: ${LINE_PT}pt; }
+.d-sig-line .lbl { position: absolute; right: 100%; bottom: 0; margin-right: 1.5mm; }
+.d-sig-line .role { position: absolute; left: 100%; bottom: 0; margin-left: 1.5mm; text-align: left; }
+.d-sig .d-sig-line + p { margin-top: 3mm; }
+.d-sig-space { height: ${LINE_PT * 1.6}pt; }
 
 /* ---------- จุดที่แก้ไขได้ + เคอร์เซอร์บนเอกสาร ----------
    ตัวหนาเสมอ (ตรงต้นฉบับ Word) ไฮไลต์/เคอร์เซอร์ไม่กระทบขนาดหรือตำแหน่งข้อความ */
