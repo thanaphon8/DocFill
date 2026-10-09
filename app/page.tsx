@@ -9,7 +9,7 @@ import React, {
 } from "react";
 import {
   FileText, Printer, Car, User, DollarSign, Eye, Sun, Moon, ZoomIn, ZoomOut, PenLine, LayoutTemplate, Eraser,
-  Pencil, Check,
+  Pencil, Check, RotateCcw,
 } from "lucide-react";
 
 /* =====================================================================
@@ -862,7 +862,7 @@ const UI_CSS = `
 .ui-progress { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 14px 16px; margin-bottom: 16px; box-shadow: var(--shadow); }
 .ui-progress-row { display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
 .ui-progress-row span:last-child { color: var(--muted); font-weight: 500; }
-.ui-progress-foot { display: flex; justify-content: flex-end; margin-top: 12px; }
+.ui-progress-foot { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .ui-btn.danger:hover { color: #dc2626; border-color: #dc2626; }
 .ui-bar { height: 8px; border-radius: 99px; background: var(--panel2); overflow: hidden; }
 .ui-bar i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width .6s cubic-bezier(.2,.8,.2,1); }
@@ -1051,6 +1051,7 @@ export default function Home() {
   /* ---------- ย้อนกลับการ "ล้างฟอร์ม" (Ctrl+Z) ---------- */
   const undoRef = useRef<{ id: string; data: FormData } | null>(null);
   const [undoToast, setUndoToast] = useState(false);
+  const [undoMsg, setUndoMsg] = useState("ล้างข้อมูลแท็บนี้แล้ว");
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** ทิ้งจุดย้อนกลับ (เมื่อผู้ใช้แก้ข้อมูล/เปลี่ยนแท็บหลังล้าง) เพื่อให้ Ctrl+Z กลับไปเป็นการย้อนปกติของช่องพิมพ์ */
   const dropUndo = () => {
@@ -1237,10 +1238,24 @@ export default function Home() {
   const clearForm = () => {
     if (!window.confirm("ล้างข้อมูลทุกช่องในแท็บนี้ใช่หรือไม่?\n(แท็บอื่นจะไม่ถูกลบ · กด Ctrl+Z เพื่อย้อนกลับได้)")) return;
     undoRef.current = { id: currentTab.id, data: currentTab.data }; // เก็บของเดิมไว้ให้ย้อนกลับ
+    setUndoMsg("ล้างข้อมูลแท็บนี้แล้ว");
     setUndoToast(true);
     if (undoTimer.current) clearTimeout(undoTimer.current);
     undoTimer.current = setTimeout(() => setUndoToast(false), 8000); // ซ่อนแถบแจ้งเตือน (Ctrl+Z ยังใช้ได้)
     setFormData(() => ({ ...BLANK }));
+    setActiveField(null);
+    setCaret(null);
+  };
+
+  /** คืนข้อมูลฟอร์มของแท็บปัจจุบันเป็นข้อมูลจำลองเริ่มต้น (INITIAL) เหมือนตอนเปิดเว็บครั้งแรก */
+  const resetToDefault = () => {
+    if (!window.confirm("คืนข้อมูลในฟอร์มของแท็บนี้เป็นค่าเริ่มต้น (ข้อมูลจำลอง) ใช่หรือไม่?\n(แท็บอื่นจะไม่ถูกเปลี่ยน · กด Ctrl+Z เพื่อย้อนกลับได้)")) return;
+    undoRef.current = { id: currentTab.id, data: currentTab.data };
+    setUndoMsg("คืนค่าเริ่มต้นแล้ว");
+    setUndoToast(true);
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    undoTimer.current = setTimeout(() => setUndoToast(false), 8000);
+    setFormData(() => ({ ...INITIAL }));
     setActiveField(null);
     setCaret(null);
   };
@@ -1707,6 +1722,10 @@ export default function Home() {
               <i style={{ width: `${percent}%` }} />
             </div>
             <div className="ui-progress-foot">
+              <button className="ui-btn sm txt" onClick={resetToDefault} title="คืนข้อมูลฟอร์มของแท็บนี้เป็นข้อมูลจำลองเริ่มต้น">
+                <RotateCcw size={14} />
+                ค่าเริ่มต้น
+              </button>
               <button className="ui-btn sm txt danger" onClick={clearForm} title="ล้างข้อมูลทุกช่องของแท็บนี้">
                 <Eraser size={14} />
                 ล้างฟอร์มแท็บนี้
@@ -1906,7 +1925,7 @@ export default function Home() {
       {/* แถบแจ้งเตือนหลังล้างฟอร์ม พร้อมปุ่มย้อนกลับ */}
       {undoToast && (
         <div className="ui-toast no-print" role="status">
-          <span>ล้างข้อมูลแท็บนี้แล้ว</span>
+          <span>{undoMsg}</span>
           <button className="ui-btn sm txt" onClick={undoClear}>
             ย้อนกลับ (Ctrl+Z)
           </button>
