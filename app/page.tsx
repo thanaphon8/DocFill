@@ -8,7 +8,7 @@ import React, {
   useState,
 } from "react";
 import {
-  FileText, Printer, Car, User, DollarSign, Eye, Sun, Moon, ZoomIn, ZoomOut, PenLine, LayoutTemplate,
+  FileText, Printer, Car, User, DollarSign, Eye, Sun, Moon, ZoomIn, ZoomOut, PenLine, LayoutTemplate, Eraser,
 } from "lucide-react";
 
 /* =====================================================================
@@ -90,6 +90,12 @@ const INITIAL = {
 };
 type FormData = typeof INITIAL;
 type FieldKey = keyof FormData;
+
+/** ฟอร์มว่างทุกช่อง (ใช้ตอนกด "ล้างฟอร์ม" และตอนกู้ข้อมูลที่บันทึกไว้) */
+const BLANK = Object.fromEntries(Object.keys(INITIAL).map((k) => [k, ""])) as FormData;
+
+/** คีย์ที่ใช้จำข้อมูลที่กรอกไว้ในเบราว์เซอร์ (เปลี่ยน v1 เป็น v2 ถ้าแก้โครงสร้างข้อมูลจนไม่เข้ากัน) */
+const STORAGE_KEY = "doc-form-tabs-v1";
 
 /** แท็บหนึ่งแท็บ = เอกสารของพนักงานหนึ่งคน */
 type DocTab = { id: string; data: FormData };
@@ -752,6 +758,8 @@ const UI_CSS = `
 .ui-progress { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 14px 16px; margin-bottom: 16px; box-shadow: var(--shadow); }
 .ui-progress-row { display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
 .ui-progress-row span:last-child { color: var(--muted); font-weight: 500; }
+.ui-progress-foot { display: flex; justify-content: flex-end; margin-top: 12px; }
+.ui-btn.danger:hover { color: #dc2626; border-color: #dc2626; }
 .ui-bar { height: 8px; border-radius: 99px; background: var(--panel2); overflow: hidden; }
 .ui-bar i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width .6s cubic-bezier(.2,.8,.2,1); }
 
@@ -901,6 +909,41 @@ export default function Home() {
 
   const zoom = userZoom ?? fitZoom;
 
+  /* ---------- จำข้อมูลที่กรอก: โหลดตอนเปิดหน้า / บันทึกทุกครั้งที่แก้ ---------- */
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw);
+        if (Array.isArray(saved?.tabs) && saved.tabs.length) {
+          const restored: DocTab[] = saved.tabs.map((t: { id?: unknown; data?: Record<string, unknown> }, i: number) => {
+            const data = { ...BLANK } as FormData;
+            (Object.keys(BLANK) as FieldKey[]).forEach((k) => {
+              const v = t?.data?.[k];
+              if (typeof v === "string") data[k] = v;
+            });
+            return { id: typeof t?.id === "string" ? t.id : `t${i}`, data };
+          });
+          setTabs(restored);
+          setDocTabId(restored.some((t) => t.id === saved.activeId) ? saved.activeId : restored[0].id);
+          const maxId = Math.max(0, ...restored.map((t) => Number(t.id.replace(/\D/g, "")) || 0));
+          idCounter.current = Math.max(Number(saved.counter) || 1, maxId + 1);
+        }
+      }
+    } catch {}
+    setHydrated(true);
+  }, []);
+  useEffect(() => {
+    if (!hydrated) return; // ยังไม่โหลดของเดิมกลับมา ห้ามเขียนทับ
+    try {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ tabs, activeId: docTabId, counter: idCounter.current })
+      );
+    } catch {}
+  }, [tabs, docTabId, hydrated]);
+
   /* ---------- ธีม ---------- */
   useEffect(() => {
     try {
@@ -967,6 +1010,14 @@ export default function Home() {
     const next = tabs.filter((t) => t.id !== id);
     setTabs(next);
     if (id === docTabId) switchTab(next[Math.max(0, i - 1)].id);
+  };
+
+  /** ล้างทุกช่องของแท็บปัจจุบัน (แท็บอื่นไม่กระทบ) */
+  const clearForm = () => {
+    if (!window.confirm("ล้างข้อมูลทุกช่องในแท็บนี้ใช่หรือไม่?\n(แท็บอื่นจะไม่ถูกลบ)")) return;
+    setFormData(() => ({ ...BLANK }));
+    setActiveField(null);
+    setCaret(null);
   };
 
   /** คนแรกใส่แท็บปัจจุบัน คนที่ 2..n สร้างแท็บใหม่ต่อท้าย */
@@ -1266,6 +1317,12 @@ export default function Home() {
             </div>
             <div className="ui-bar">
               <i style={{ width: `${percent}%` }} />
+            </div>
+            <div className="ui-progress-foot">
+              <button className="ui-btn sm txt danger" onClick={clearForm} title="ล้างข้อมูลทุกช่องของแท็บนี้">
+                <Eraser size={14} />
+                ล้างฟอร์มแท็บนี้
+              </button>
             </div>
           </div>
 
