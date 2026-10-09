@@ -1084,6 +1084,8 @@ export default function Home() {
   const measureRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const lastFieldRef = useRef<FieldKey | null>(null);
+  const lastTickRef = useRef(0);
+  const [focusTick, setFocusTick] = useState(0); // เพิ่มทุกครั้งที่ผู้ใช้โฟกัส/คลิกช่องในฟอร์ม → สั่งเลื่อนเอกสารไปจุดนั้นใหม่
 
   const zoom = userZoom ?? fitZoom;
   // เก็บค่าซูมล่าสุดไว้ให้ตัวดักล้อเมาส์ (ผูกครั้งเดียว) อ่านได้ โดยไม่ต้องผูกใหม่ทุกครั้งที่ซูมเปลี่ยน
@@ -1419,19 +1421,23 @@ export default function Home() {
       lastFieldRef.current = null;
       return;
     }
-    const fieldChanged = lastFieldRef.current !== activeField;
+    const fieldChanged = lastFieldRef.current !== activeField || lastTickRef.current !== focusTick;
     lastFieldRef.current = activeField;
+    lastTickRef.current = focusTick;
     const id = requestAnimationFrame(() => {
       const scroller = stageRef.current;
       if (!scroller || scroller.clientHeight === 0) return;
-      const carets = Array.from(scroller.querySelectorAll<HTMLElement>(".doc-caret"));
-      const visible = carets.find((c) => {
+      // หาจุดที่กำลังแก้: ใช้เคอร์เซอร์ก่อน ถ้าไม่มี (เช่น แท็บที่ผู้ใช้แก้เนื้อหาเอกสารเอง) ใช้ช่องที่ไฮไลต์ (.is-active) แทน
+      const inView = (c: HTMLElement) => {
         const vp = c.closest(".a4-page")?.querySelector(".a4-viewport");
         if (!vp) return false;
         const r = c.getBoundingClientRect();
         const v = vp.getBoundingClientRect();
         return r.left >= v.left - 2 && r.left <= v.right + 2 && r.top >= v.top - 2 && r.top <= v.bottom + 2;
-      });
+      };
+      const carets = Array.from(scroller.querySelectorAll<HTMLElement>(".doc-caret"));
+      const actives = Array.from(scroller.querySelectorAll<HTMLElement>("[data-field].is-active"));
+      const visible = carets.find(inView) ?? actives.find(inView);
       if (!visible) return;
       const sr = scroller.getBoundingClientRect();
       const cr = visible.getBoundingClientRect();
@@ -1442,7 +1448,7 @@ export default function Home() {
       }
     });
     return () => cancelAnimationFrame(id);
-  }, [activeField, caret, formData]);
+  }, [activeField, caret, formData, focusTick]);
 
   /* ---------- ข้อความที่คลิกแก้ไขได้บนเอกสาร (พร้อมเคอร์เซอร์) ---------- */
   const hl: Highlight = (field, placeholder = DOTS) => {
@@ -1751,6 +1757,7 @@ export default function Home() {
                       onChange: handleChange,
                       onFocus: (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
                         setActiveField(f.name);
+                        setFocusTick((n) => n + 1);
                         syncCaret(e.currentTarget);
                       },
                       onBlur: () => {
@@ -1761,8 +1768,10 @@ export default function Home() {
                         syncCaret(e.currentTarget),
                       onKeyUp: (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) =>
                         syncCaret(e.currentTarget),
-                      onClick: (e: React.MouseEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-                        syncCaret(e.currentTarget),
+                      onClick: (e: React.MouseEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+                        setFocusTick((n) => n + 1);
+                        syncCaret(e.currentTarget);
+                      },
                       className: "ui-input",
                     };
                     return (
