@@ -33,6 +33,7 @@ const M_LEFT = 25.4;
 type Letterhead = {
   id: string; label: string; company: string; office: string; head: string; foot: string;
   headW: number; footW: number; headTop: number; mTop: number; mBottom: number;
+  footBottom?: number; // ระยะรูปท้ายจากขอบล่างกระดาษ (มม.) ยิ่งมากรูปยิ่งขยับขึ้น (ถ้าไม่ระบุใช้ FOOT_BOTTOM_MM) ควรเพิ่ม mBottom ตามไปด้วย
 };
 const LETTERHEADS: Letterhead[] = [
   { id: "com7", label: "COM7", company: "บริษัท คอมเซเว่น จำกัด (มหาชน)",
@@ -43,6 +44,10 @@ const LETTERHEADS: Letterhead[] = [
     office: "สำนักงาน ตั้งอยู่เลขที่ 549/1 ถนนสรรพาวุธ แขวงบางนาใต้ เขตบางนา กรุงเทพมหานคร", // TODO: แก้เป็นที่อยู่สำนักงานของ ยูฟัน แคปปิตอล
     head: "/img/ufun/ufunhead.png", foot: "/img/ufun/ufunfoot.png",
     headW: 210, footW: 210, headTop: 8, mTop: 40, mBottom: 30 },
+  { id: "see", label: "SEE", company: "บริษัท ซี โนว์ ฮาว จำกัด",
+    office: "สำนักงาน ตั้งอยู่เลขที่ 549/1 ถนนสรรพาวุธ แขวงบางนาใต้ เขตบางนา กรุงเทพมหานคร", // TODO: แก้เป็นที่อยู่สำนักงานของ ซี โนว์ ฮาว
+    head: "/img/see/seehead.png", foot: "/img/see/seefoot.png",
+    headW: 210, footW: 210, headTop: 8, mTop: 40, mBottom: 36, footBottom: 6 }, // หัวขยับลง 8 มม. / ท้ายขยับขึ้น 6 มม. (ปรับได้)
 ];
 const FOOT_BOTTOM_MM = 0; // ระยะรูปท้ายจากขอบล่างกระดาษ
 const CONTENT_W = +(PAGE_W - M_LEFT - M_RIGHT).toFixed(2); // 160.3 mm
@@ -588,7 +593,7 @@ const DOC_CSS = `
 .a4-foot.in { animation: lhFootIn .55s cubic-bezier(.2,.8,.2,1) both; }
 .a4-head.out, .a4-foot.out { animation: lhOut .45s ease forwards; }
 .a4-viewport.lh-swap { animation: lhText .55s cubic-bezier(.2,.8,.2,1) .08s both; }
-.a4-foot { bottom: ${FOOT_BOTTOM_MM}mm; width: var(--foot-w); }
+.a4-foot { bottom: var(--foot-bottom, ${FOOT_BOTTOM_MM}mm); width: var(--foot-w); }
 
 /* หน้าต่างตัดเนื้อหา: กว้างกว่าพื้นที่เนื้อหาข้างละ ${BLEED}mm เพื่อไม่ตัดขอบตารางที่กว้างกว่าข้อความ
    (ยังน้อยกว่าระยะห่างคอลัมน์ ${COLUMN_GAP}mm จึงไม่เห็นข้อความหน้าอื่นเล็ดเข้ามา) */
@@ -1165,6 +1170,7 @@ export default function Home() {
     "--head-w": `${letterhead.headW}mm`,
     "--head-top": `${letterhead.headTop}mm`,
     "--foot-w": `${letterhead.footW}mm`,
+    "--foot-bottom": `${letterhead.footBottom ?? FOOT_BOTTOM_MM}mm`,
   } as React.CSSProperties;
 
   const allFields = SECTIONS.flatMap((s) => s.fields);
@@ -1385,7 +1391,7 @@ export default function Home() {
                         <img className="a4-head out" src={prevLh.head} alt="" draggable={false}
                           style={{ top: `${prevLh.headTop}mm`, width: `${prevLh.headW}mm` }} />
                         <img className="a4-foot out" src={prevLh.foot} alt="" draggable={false}
-                          style={{ width: `${prevLh.footW}mm` }} />
+                          style={{ width: `${prevLh.footW}mm`, bottom: `${prevLh.footBottom ?? FOOT_BOTTOM_MM}mm` }} />
                       </>
                     )}
                     <img key={`h${swapN}`} className={`a4-head${swapN ? " in" : ""}`} src={letterhead.head} alt="" draggable={false} />
