@@ -132,6 +132,73 @@ const parseNames = (text: string) =>
     )
     .filter(Boolean);
 
+/* ---------- แปลงจำนวนเงินเป็นตัวอักษรไทย (เช่น 10,000 → หนึ่งหมื่นบาทถ้วน) ---------- */
+const TH_NUM = ["ศูนย์", "หนึ่ง", "สอง", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า"];
+const TH_UNIT = ["", "สิบ", "ร้อย", "พัน", "หมื่น", "แสน"];
+
+/** อ่านเลขไม่เกิน 6 หลัก (ต่ำกว่าล้าน) · hasHigher = มีหลักล้านขึ้นไปอยู่ข้างหน้า (ใช้ตัดสินคำว่า "เอ็ด") */
+function thaiBelowMillion(chunk: string, hasHigher: boolean): string {
+  const s = chunk.replace(/^0+/, "");
+  let out = "";
+  for (let i = 0; i < s.length; i++) {
+    const pos = s.length - 1 - i;
+    const d = Number(s[i]);
+    if (d === 0) continue;
+    if (pos === 1) out += d === 1 ? "สิบ" : d === 2 ? "ยี่สิบ" : TH_NUM[d] + "สิบ";
+    else if (pos === 0) out += d === 1 && (s.length > 1 || hasHigher) ? "เอ็ด" : TH_NUM[d];
+    else out += TH_NUM[d] + TH_UNIT[pos];
+  }
+  return out;
+}
+
+/** อ่านจำนวนเต็ม (สตริงตัวเลขล้วน) เป็นคำไทย รองรับเกินล้าน (ล้านล้าน ฯลฯ) */
+function thaiInteger(digits: string): string {
+  const s = digits.replace(/^0+/, "");
+  if (!s) return "ศูนย์";
+  const groups: string[] = [];
+  for (let end = s.length; end > 0; end -= 6) groups.unshift(s.slice(Math.max(0, end - 6), end));
+  let out = "";
+  groups.forEach((g, idx) => {
+    const fromRight = groups.length - 1 - idx; // 0 = กลุ่มหน่วย, 1 = ล้าน, 2 = ล้านล้าน ...
+    const t = thaiBelowMillion(g, idx < groups.length - 1 || false);
+    if (t) out += t + "ล้าน".repeat(fromRight);
+  });
+  return out;
+}
+
+/** จำนวนเงิน → ข้อความ "…บาทถ้วน" / "…บาท…สตางค์"
+ *  คืน "" ถ้าช่องว่าง, คืน null ถ้ารูปแบบตัวเลขยังไม่ถูกต้อง (เช่น กำลังพิมพ์ค้าง/มีตัวอักษร) */
+function bahtText(raw: string): string | null {
+  const v = raw.replace(/[,\s฿บาท]/g, "");
+  if (!v) return "";
+  if (!/^\d+(\.\d{0,2})?$/.test(v)) return null;
+  const [intPart, decRaw = ""] = v.split(".");
+  const satang = decRaw.padEnd(2, "0");
+  const hasInt = /[1-9]/.test(intPart);
+  const hasSat = satang !== "00";
+  if (!hasInt && !hasSat) return "ศูนย์บาทถ้วน";
+  const bahtPart = hasInt ? thaiInteger(intPart) + "บาท" : "";
+  if (!hasSat) {
+    // "ถ้วน" เฉพาะยอดกลมๆ (ลงท้าย 000 เช่น 10,000 / 50,000) · ยอดอื่น เช่น 10,800 → "หนึ่งหมื่นแปดร้อยบาท"
+    // ถ้าอยากให้ยอดกลมน้อยลง/มากขึ้น แก้จำนวนเลข 0 ใน regex ด้านล่าง
+    return bahtPart + (/000$/.test(intPart) ? "ถ้วน" : "");
+  }
+  return bahtPart + thaiBelowMillion(satang, false) + "สตางค์";
+}
+
+/** ช่องจำนวนเงิน: ใส่เครื่องหมาย , คั่นหลักพันให้อัตโนมัติ (เก็บเฉพาะตัวเลขและทศนิยมไม่เกิน 2 ตำแหน่ง) */
+const MONEY_FIELDS: FieldKey[] = ["deductionAmount", "depositAmount"];
+function formatMoney(raw: string): string {
+  const cleaned = raw.replace(/[^\d.]/g, "");
+  if (!cleaned) return "";
+  const dot = cleaned.indexOf(".");
+  const intRaw = dot === -1 ? cleaned : cleaned.slice(0, dot);
+  const decRaw = dot === -1 ? null : cleaned.slice(dot + 1).replace(/\./g, "").slice(0, 2);
+  const intDigits = intRaw.replace(/^0+(?=\d)/, "") || "0";
+  const withCommas = intDigits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return decRaw === null ? withCommas : `${withCommas}.${decRaw}`;
+}
+
 type FieldDef = {
   name: FieldKey;
   label: string;
@@ -183,7 +250,7 @@ const SECTIONS: SectionDef[] = [
       { name: "deductionAmount", label: "หักค่าสึกหรอ (บาท/เดือน)" },
       { name: "deductionMonths", label: "ระยะเวลา (เดือน)" },
       { name: "depositAmount", label: "เงินประกัน (บาท)" },
-      { name: "depositAmountText", label: "เงินประกัน (ตัวอักษร)" },
+      { name: "depositAmountText", label: "เงินประกัน (ตัวอักษร)", placeholder: "เติมอัตโนมัติจากจำนวนเงิน (แก้เองได้)" },
       { name: "depositDate", label: "วันที่ชำระเงินประกัน", full: true },
     ],
   },
@@ -1100,10 +1167,41 @@ export default function Home() {
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
+    const el = e.target;
+    const { name } = el;
+    let value = el.value;
     dropUndo();
-    setFormData((prev) => ({ ...prev, [name]: value }));
-    syncCaret(e.target);
+
+    let caretPos = el.selectionStart ?? value.length;
+    if (MONEY_FIELDS.includes(name as FieldKey)) {
+      // ช่องจำนวนเงิน: ใส่ , ให้อัตโนมัติ แล้วคำนวณตำแหน่งเคอร์เซอร์ใหม่ให้ตรงกับตัวเลขที่ผู้ใช้กำลังพิมพ์
+      const keep = (value.slice(0, caretPos).match(/[\d.]/g) ?? []).length;
+      const formatted = formatMoney(value);
+      let pos = 0;
+      let seen = 0;
+      while (pos < formatted.length && seen < keep) {
+        if (/[\d.]/.test(formatted[pos])) seen++;
+        pos++;
+      }
+      value = formatted;
+      caretPos = pos;
+      requestAnimationFrame(() => {
+        try { el.setSelectionRange(pos, pos); } catch {}
+      });
+    }
+
+    if (name === "depositAmount") {
+      // กรอกจำนวนเงิน → เติม "เงินประกัน (ตัวอักษร)" ให้อัตโนมัติ (ยังแก้ช่องตัวอักษรเองทีหลังได้)
+      const text = bahtText(value);
+      setFormData((prev) => ({
+        ...prev,
+        depositAmount: value,
+        ...(text !== null ? { depositAmountText: text } : {}),
+      }));
+    } else {
+      setFormData((prev) => ({ ...prev, [name]: value }));
+    }
+    setCaret(caretPos);
   };
 
   /* ---------- จัดการแท็บ ---------- */
@@ -1443,6 +1541,14 @@ export default function Home() {
         const orig = isEmpty ? "" : s.dataset.orig ?? "";
         if (cur !== orig) changes[k] = cur;
       });
+      MONEY_FIELDS.forEach((k) => {
+        if (changes[k] !== undefined) changes[k] = formatMoney(changes[k] as string);
+      });
+      // แก้จำนวนเงินประกันบนเอกสาร (ทุกแท็บ) → อัปเดตตัวอักษรตามด้วย ถ้าไม่ได้แก้ช่องตัวอักษรเอง
+      if (changes.depositAmount !== undefined && changes.depositAmountText === undefined) {
+        const t = bahtText(changes.depositAmount);
+        if (t !== null) changes.depositAmountText = t;
+      }
     }
     const box = document.createElement("div");
     box.innerHTML = el.innerHTML;
